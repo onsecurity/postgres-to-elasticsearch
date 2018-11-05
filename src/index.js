@@ -123,6 +123,7 @@ let insertHistoricAudit = function(cursor) {
     let reader;
     let processedRows = 0;
     let hstore = require('pg-hstore')();
+    let highestEventId = null;
 
     reader = () => {
         cursor.read(INDEX_QUEUE_LIMIT, (err, rows, result) => {
@@ -131,6 +132,9 @@ let insertHistoricAudit = function(cursor) {
             }
 
             rows.forEach((row) => {
+                if (row[PG_UID_COLUMN] > highestEventId || highestEventId === null) {
+                    highestEventId = parseInt(row[PG_UID_COLUMN]);
+                }
                 createRecord(row);
             });
 
@@ -138,6 +142,9 @@ let insertHistoricAudit = function(cursor) {
 
             if (!rows.length) {
                 info('No more historic rows to process, processed a total of ' + processedRows + ' rows');
+                if (highestEventId !== null) {
+                    deleteAfterHistoricAuditProcessed(highestEventId);
+                }
             } else {
                 reader();
             }
@@ -236,6 +243,23 @@ let deleteAfterIndex = function(event_ids) {
     })
 };
 
+let deleteAfterHistoricAuditProcessed = function(lastProcessedEventId) {
+    info('Deleting rows after historic audit process');
+    debug('Deleting rows where ' + PG_UID_COLUMN + ' < ' + lastProcessedEventId);
+    let result = pgClient.query(
+        'DELETE FROM ' + PgEscape.ident(PG_DELETE_SCHEMA) + '.' + PgEscape.ident(PG_DELETE_TABLE) +
+        ' WHERE ' + PgEscape.ident(PG_UID_COLUMN) + ' < $1',
+        [lastProcessedEventId],
+        (err, res) => {
+            if (err) {
+                error('Error when deleting rows from database', err);
+                return;
+            }
+            info('Deleted a total of ' + res.rowCount + ' rows');
+        }
+    );
+};
+
 let flushIndexQueue = function() {
     return new Promise((accept, reject) => {
         if (!indexQueue.length) {
@@ -328,13 +352,12 @@ if (STATUS_UPDATE) {
 
 process.on('SIGTERM', function () {
     log('Received SIGTERM, shutting down');
-    debug('Closing PG connection');
-    pgClient.end().then(() => {
-        debug('Closed PG connection');
-        debug('Flushing indexQueue');
-        flushIndexQueue().then(() => {
-            log('Flushing remaining queue');
-            debug('Flushed indexQueue');
+    log('Flushing remaining queue');
+    flushIndexQueue().then(() => {
+        debug('Flushed indexQueue');
+        debug('Closing PG connection');
+        pgClient.end().then(() => {
+            debug('Closed PG connection');
             debug('Closing ES connection');
             esClient.close();
             debug('Closed ES connection');
