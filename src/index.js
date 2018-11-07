@@ -11,13 +11,15 @@ const PG_UID_COLUMN = process.env.PG_UID_COLUMN || 'event_id'; // The primary ke
 const PG_DELETE_ON_INDEX = process.env.PG_DELETE_ON_INDEX || false; // Delete the rows in PostgreSQL after they have been indexed to Elasticsearch
 const PG_DELETE_SCHEMA = process.env.PG_DELETE_SCHEMA || 'public'; // The schema of the table which rows which will be deleted from PG_DELETE_ON_INDEX
 const PG_DELETE_TABLE = process.env.PG_DELETE_TABLE || 'audit'; // The table name which rows will be deleted from by PG_DELETE_ON_INDEX
+const ES_LABEL_NAME = process.env.ES_LABEL_NAME || 'label';
+const ES_LABEL = process.env.ES_LABEL || null;
 const ES_HOST = process.env.ES_HOST || 'localhost'; // The hostname for the Elasticsearch server (pooling not supported currently)
 const ES_PORT = process.env.ES_PORT || 9200;  // The port for the Elasticsearch server
 const ES_PROTO = process.env.ES_PROTO || 'https'; // The protocol used for the Elasticsearch server connections
 const ES_INDEX = process.env.ES_INDEX || 'audit'; // The Elasticsearch index the data should be stored in
 const ES_TYPE = process.env.ES_TYPE || 'row'; // The type of the data to be stored in Elasticsearch
 const INDEX_QUEUE_LIMIT = process.env.INDEX_QUEUE_LIMIT || 200; // The maximum number of items that should be queued before pushing to Elasticsearch
-const INDEX_QUEUE_TIMEOUT = process.env.INDEX_QUEUE_TIMEOUT || 120; // The maximum time for an item to be in the queue before it is pushed to Elasticsearch
+const INDEX_QUEUE_TIMEOUT = process.env.INDEX_QUEUE_TIMEOUT || 120; // The maximum seconds for an item to be in the queue before it is pushed to Elasticsearch
 const STATUS_UPDATE = DEBUG ? true : (process.env.STATUS_UPDATE || true); // Show a status update message in stdout
 const STATUS_UPDATE_INTERVAL = process.env.STATUS_UPDATE_INTERVAL || 60; // How often (in seconds) the status update message should be sent
 
@@ -76,6 +78,8 @@ let createAuditIndex = function() {
         let mappings = {}
         mappings[ES_TYPE] = {"properties": {}};
         mappings[ES_TYPE].properties[PG_TIMESTAMP_COLUMN] = {"type": "date"};
+        mappings[ES_TYPE].properties[PG_UID_COLUMN] = {"type": "long"};
+        mappings[ES_TYPE].properties[ES_LABEL_NAME] = {"type": "keyword"};
 
         esClient.indices.create({
             index: ES_INDEX,
@@ -111,6 +115,9 @@ let processHistoricAudit = function() {
         const cursor = pgClient.query(new Cursor('SELECT * FROM audit.logged_actions WHERE ' + PgEscape.ident(PG_UID_COLUMN) + ' > $1', [event_id]));
         info('Historic audit query completed, processing...');
         insertHistoricAudit(cursor);
+        if (PG_DELETE_ON_INDEX) {
+            deleteAfterHistoricAuditProcessed(event_id);
+        }
     }).catch(() => {
         info('Loading all available audit data for backlog processing');
         const cursor = pgClient.query(new Cursor('SELECT * FROM audit.logged_actions'));
@@ -131,18 +138,18 @@ let insertHistoricAudit = function(cursor) {
                 fatal('Unable to read historic audit cursor', err);
             }
 
-            rows.forEach((row) => {
+            rows.forEach(async (row) => {
                 if (row[PG_UID_COLUMN] > highestEventId || highestEventId === null) {
                     highestEventId = parseInt(row[PG_UID_COLUMN]);
                 }
-                createRecord(row);
+                await createRecord(row);
             });
 
             processedRows += rows.length;
 
             if (!rows.length) {
                 info('No more historic rows to process, processed a total of ' + processedRows + ' rows');
-                if (highestEventId !== null) {
+                if (PG_DELETE_ON_INDEX && highestEventId !== null) {
                     deleteAfterHistoricAuditProcessed(highestEventId);
                 }
             } else {
@@ -158,10 +165,18 @@ let getLastProcessedEventId = function() {
         debug('Searching for last processed ' + PG_UID_COLUMN);
         let sort = {};
         sort[PG_TIMESTAMP_COLUMN] = {"order": "desc"};
+
+        let query = {match_all: {}};
+        if (ES_LABEL_NAME && ES_LABEL) {
+            query = {term: {}};
+            query.term[ES_LABEL_NAME] = ES_LABEL;
+        }
+        debug('Searching for last processed ' + PG_UID_COLUMN + ' using query:', query);
+
         esClient.search({
             index: ES_INDEX,
             body: {
-                query: {match_all: {}},
+                query,
                 from: 0,
                 size: 1,
                 sort: [sort]
@@ -180,27 +195,40 @@ let getLastProcessedEventId = function() {
     });
 };
 
-let createRecord = function(payload) {
-    debug('Queuing record with payload: ', payload);
+let createRecord = async function(payload) {
+    return new Promise((accept, reject) => {
+        debug('Queuing record with payload: ', payload);
 
-    indexQueue.push(
-        {
-            index: {
-                _index: ES_INDEX,
-                _type: ES_TYPE
-            }
-        },
-        payload
-    );
+        let postPayload = {...payload};
 
-    debug('New indexQueue length: ' + (indexQueue.length / 2));
+        if (ES_LABEL && ES_LABEL_NAME) {
+            postPayload[ES_LABEL_NAME] = ES_LABEL;
+        }
 
-    if (indexQueue.length / 2 >= INDEX_QUEUE_LIMIT) {
-        debug('indexQueue length is ' + (indexQueue.length / 2) + ', flushing as over INDEX_QUEUE_LIMIT');
-        flushIndexQueue();
-    } else {
-        startFlushIndexQueueTimeout();
-    }
+        indexQueue.push(
+            {
+                index: {
+                    _index: ES_INDEX,
+                    _type: ES_TYPE
+                }
+            },
+            postPayload
+        );
+
+        debug('New indexQueue length: ' + (indexQueue.length / 2));
+
+        if (indexQueue.length / 2 >= INDEX_QUEUE_LIMIT) {
+            debug('indexQueue length is ' + (indexQueue.length / 2) + ', flushing as over INDEX_QUEUE_LIMIT');
+            flushIndexQueue().then(() => {
+                accept();
+            }).catch(() => {
+                //
+            })
+        } else {
+            startFlushIndexQueueTimeout();
+            accept();
+        }
+    });
 };
 
 let startFlushIndexQueueTimeout = function() {
@@ -218,37 +246,42 @@ let startFlushIndexQueueTimeout = function() {
 };
 
 let deleteAfterIndex = function(event_ids) {
-    debug('Deleting ' + event_ids.length + ' rows after index');
-    let chunks = _.chunk(event_ids, 34464);
-    debug('Chunked ' + event_ids.length + ' rows into ' + chunks.length + ' chunks.');
-    chunks.forEach((chunk) => {
+    return new Promise((accept, reject) => {
+        debug('Deleting ' + event_ids.length + ' rows after index');
+        let chunks = _.chunk(event_ids, 34464);
+        debug('Chunked ' + event_ids.length + ' rows into ' + chunks.length + ' chunks.');
+        chunks.forEach((chunk, index) => {
 
-        let params = [];
-        for (let paramId = 1; paramId <= chunk.length; paramId++) {
-            params.push('$' + paramId);
-        }
-
-        let result = pgClient.query(
-            'DELETE FROM ' + PgEscape.ident(PG_DELETE_SCHEMA) + '.' + PgEscape.ident(PG_DELETE_TABLE) +
-            ' WHERE ' + PgEscape.ident(PG_UID_COLUMN) + ' IN (' + params.join(',') + ')',
-            chunk,
-            (err, res) => {
-                if (err) {
-                    error('Error when deleting rows from database', err);
-                    return;
-                }
-                info('Attempted to delete ' + chunk.length + ' rows, actually deleted ' + res.rowCount + ' rows');
+            let params = [];
+            for (let paramId = 1; paramId <= chunk.length; paramId++) {
+                params.push('$' + paramId);
             }
-        );
-    })
+
+            let result = pgClient.query(
+                'DELETE FROM ' + PgEscape.ident(PG_DELETE_SCHEMA) + '.' + PgEscape.ident(PG_DELETE_TABLE) +
+                ' WHERE ' + PgEscape.ident(PG_UID_COLUMN) + ' IN (' + params.join(',') + ')',
+                chunk,
+                (err, res) => {
+                    if (err) {
+                        error('Error when deleting rows from database', err);
+                        reject();
+                        return;
+                    }
+                    info('Attempted to delete ' + chunk.length + ' rows, actually deleted ' + res.rowCount + ' rows');
+                    if (index === chunks.length - 1) {
+                        accept();
+                    }
+                }
+            );
+        });
+    });
 };
 
 let deleteAfterHistoricAuditProcessed = function(lastProcessedEventId) {
-    info('Deleting rows after historic audit process');
-    debug('Deleting rows where ' + PG_UID_COLUMN + ' < ' + lastProcessedEventId);
+    debug('Deleting rows where ' + PG_UID_COLUMN + ' <= ' + lastProcessedEventId);
     let result = pgClient.query(
         'DELETE FROM ' + PgEscape.ident(PG_DELETE_SCHEMA) + '.' + PgEscape.ident(PG_DELETE_TABLE) +
-        ' WHERE ' + PgEscape.ident(PG_UID_COLUMN) + ' < $1',
+        ' WHERE ' + PgEscape.ident(PG_UID_COLUMN) + ' <= $1',
         [lastProcessedEventId],
         (err, res) => {
             if (err) {
@@ -271,25 +304,30 @@ let flushIndexQueue = function() {
         indexQueue = [];
         let indexQueueLength = flushingIndexQueue.length / 2;
         debug('Flushing index queue of ' + indexQueueLength + ' items');
+        debug('Queue items to be flushed', flushingIndexQueue);
         esClient.bulk({
             body: flushingIndexQueue
         }, (err, resp, status) => {
             if (err) {
-                error(err, resp);
+                error('Unable to flush queue', err, resp);
                 debug('Readding ' + indexQueueLength + ' items to the indexQueue');
                 indexQueue = flushingIndexQueue.concat(indexQueue);
                 debug('New indexQueue length: ' + (indexQueue.length / 2));
                 reject();
             } else {
+                info('Flushed ' + indexQueueLength + ' records');
                 debug('Successfully created ' + indexQueueLength + ' indices', resp);
                 debug('New indexQueue length: ' + (indexQueue.length / 2));
                 addedIndexesTotal += indexQueueLength;
                 if (PG_DELETE_ON_INDEX) {
                     let eventIds = _.map(_.filter(flushingIndexQueue, (val, index) => index % 2 === 1), (index) => index[PG_UID_COLUMN]);
                     debug('UIDs to be deleted: ', eventIds);
-                    deleteAfterIndex(eventIds);
+                    deleteAfterIndex(eventIds).then(() => {
+                        accept();
+                    });
+                } else {
+                    accept();
                 }
-                accept();
             }
         });
     });
@@ -313,10 +351,35 @@ let setPgTypeParsers = function() {
     let types = Pg.types;
     let hstore = require('pg-hstore')();
 
-    types.setTypeParser(48718, (val) => {
-        return hstore.parse(val);
+    getHstoreTypeId().then((typeId) => {
+        info('Found Hstore type id, Hstore processing enabled.');
+        types.setTypeParser(typeId, (val) => {
+            return hstore.parse(val);
+        });
+    }).catch(() => {
+        info('Cannot find hstore type id, will not process hstore data.');
     });
-}
+};
+
+let getHstoreTypeId = function() {
+    return new Promise((accept, reject) => {
+        let result = pgClient.query(
+            'SELECT oid FROM pg_type where typname = $1',
+            ['hstore'],
+            (err, res) => {
+                if (err || !res.rows.length) {
+                    debug('Hstore search error', err);
+                    return reject();
+                }
+
+                if (res.rows.length) {
+                    debug('Found hstore type oid', res.rows[0].oid);
+                    return accept(res.rows[0].oid);
+                }
+            }
+        );
+    });
+};
 
 let start = function() {
     connectToPg().then(() => {
