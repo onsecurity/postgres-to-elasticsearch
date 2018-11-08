@@ -1,16 +1,17 @@
-const DEBUG = process.env.DEBUG || false; // Show debug + info messages
-const INFO = DEBUG ? true : (process.env.INFO || true); // Show info messages
+const DEBUG = parseInt(process.env.DEBUG) || 0; // Show debug + info messages
+const INFO = DEBUG ? 1 : (parseInt(process.env.INFO) || 1); // Show info messages
 const PG_HOST = process.env.PG_HOST || 'localhost'; // Host of the PostgreSQL database server
 const PG_DATABASE = process.env.PG_DATABASE || 'databasename'; // Name of the PostgreSQL database
 const PG_USERNAME = process.env.PG_USERNAME || 'root'; // Username of the PostgreSQL database
 const PG_PASSWORD = process.env.PG_PASSWORD || ''; // Password of the PostgreSQL database
 const PG_LISTEN_TO = process.env.PG_LISTEN_TO || 'audit'; // The LISTEN queue to listen on for the PostgreSQL database - https://www.postgresql.org/docs/9.1/static/sql-notify.html
+const PG_LISTEN_TO_ID = process.env.PG_LISTEN_TO_ID || PG_LISTEN_TO + '_id'; // The LISTEN queue to listen on for the PostgreSQL database for big sets of data (data over 8000 characters cannot be sent via NOTIFY)
 const PG_PORT = process.env.PG_PORT || 5432; // The port that the PostgreSQL database is listening on
 const PG_TIMESTAMP_COLUMN = process.env.PG_TIMESTAMP_COLUMN || 'action_timestamp'; // The column of the row that is used as the timestamp for Elasticsearch
 const PG_UID_COLUMN = process.env.PG_UID_COLUMN || 'event_id'; // The primary key column of the row that is stored in Elasticsearch
-const PG_DELETE_ON_INDEX = process.env.PG_DELETE_ON_INDEX || false; // Delete the rows in PostgreSQL after they have been indexed to Elasticsearch
-const PG_DELETE_SCHEMA = process.env.PG_DELETE_SCHEMA || 'public'; // The schema of the table which rows which will be deleted from PG_DELETE_ON_INDEX
-const PG_DELETE_TABLE = process.env.PG_DELETE_TABLE || 'audit'; // The table name which rows will be deleted from by PG_DELETE_ON_INDEX
+const PG_DELETE_ON_INDEX = parseInt(process.env.PG_DELETE_ON_INDEX) || 0; // Delete the rows in PostgreSQL after they have been indexed to Elasticsearch
+const PG_SCHEMA = process.env.PG_SCHEMA || 'public'; // The schema of the table which rows which will be deleted from PG_DELETE_ON_INDEX
+const PG_TABLE = process.env.PG_TABLE || 'audit'; // The table name which rows will be deleted from by PG_DELETE_ON_INDEX
 const ES_LABEL_NAME = process.env.ES_LABEL_NAME || 'label';
 const ES_LABEL = process.env.ES_LABEL || null;
 const ES_HOST = process.env.ES_HOST || 'localhost'; // The hostname for the Elasticsearch server (pooling not supported currently)
@@ -20,8 +21,10 @@ const ES_INDEX = process.env.ES_INDEX || 'audit'; // The Elasticsearch index the
 const ES_TYPE = process.env.ES_TYPE || 'row'; // The type of the data to be stored in Elasticsearch
 const INDEX_QUEUE_LIMIT = process.env.INDEX_QUEUE_LIMIT || 200; // The maximum number of items that should be queued before pushing to Elasticsearch
 const INDEX_QUEUE_TIMEOUT = process.env.INDEX_QUEUE_TIMEOUT || 120; // The maximum seconds for an item to be in the queue before it is pushed to Elasticsearch
-const STATUS_UPDATE = DEBUG ? true : (process.env.STATUS_UPDATE || true); // Show a status update message in stdout
+const STATUS_UPDATE = DEBUG ? 1 : (parseInt(process.env.STATUS_UPDATE) || 0); // Show a status update message in stdout
 const STATUS_UPDATE_INTERVAL = process.env.STATUS_UPDATE_INTERVAL || 60; // How often (in seconds) the status update message should be sent
+
+// ---- End of env vars
 
 const _ = require('lodash');
 const Pg = require('pg');
@@ -95,24 +98,51 @@ let createAuditIndex = function() {
     });
 };
 
+let loadPgRow = function(event_id) {
+    return new Promise((accept, reject) => {
+        pgClient.query('SELECT * FROM ' + PgEscape.ident(PG_SCHEMA) + '.' + PgEscape.ident(PG_TABLE) + ' WHERE ' + PgEscape.ident(PG_UID_COLUMN) + ' > $1', [event_id]).then((res) => {
+            if (res.rowCount) {
+                return accept(res.rows[0]);
+            } else {
+                return reject();
+            }
+        }).catch(() => {
+            return reject();
+        });
+    });
+}
+
 let startListener = function() {
     pgClient.on('notification', function (msg) {
-        debug('Received notification', msg);
-        createRecord(JSON.parse(msg.payload));
+        debug('Received notification on ' + msg.channel, msg.payload);
+        if (msg.channel === PG_LISTEN_TO) {
+            createRecord(JSON.parse(msg.payload));
+        } else if (msg.channel === PG_LISTEN_TO_ID) {
+            loadPgRow(parseInt(msg.payload)).then((row) => {
+                createRecord(row);
+            }).catch(() => {
+                error('Unable to load row from database, id: ', msg.payload);
+            })
+        }
     });
     debug('PG notification listener created');
 
     let listenQuery = pgClient.query("LISTEN " + PG_LISTEN_TO).then(() => {
         info('LISTEN statement completed');
-    }).catch(() => {
-        fatal('LISTEN statement failed');
+    }).catch((err) => {
+        fatal('LISTEN statement failed', onvrdisplaypointerrestricted);
+    });
+    let listenQueryId = pgClient.query("LISTEN " + PG_LISTEN_TO_ID).then(() => {
+        info('LISTEN ID statement completed');
+    }).catch((err) => {
+        fatal('LISTEN ID statement failed', err);
     });
 };
 
 let processHistoricAudit = function() {
     info('Processing historic audit');
     getLastProcessedEventId().then((event_id) => {
-        const cursor = pgClient.query(new Cursor('SELECT * FROM audit.logged_actions WHERE ' + PgEscape.ident(PG_UID_COLUMN) + ' > $1', [event_id]));
+        const cursor = pgClient.query(new Cursor('SELECT * FROM ' + PgEscape.ident(PG_SCHEMA) + '.' + PgEscape.ident(PG_TABLE) + ' WHERE ' + PgEscape.ident(PG_UID_COLUMN) + ' > $1', [event_id]));
         info('Historic audit query completed, processing...');
         insertHistoricAudit(cursor);
         if (PG_DELETE_ON_INDEX) {
@@ -258,7 +288,7 @@ let deleteAfterIndex = function(event_ids) {
             }
 
             let result = pgClient.query(
-                'DELETE FROM ' + PgEscape.ident(PG_DELETE_SCHEMA) + '.' + PgEscape.ident(PG_DELETE_TABLE) +
+                'DELETE FROM ' + PgEscape.ident(PG_SCHEMA) + '.' + PgEscape.ident(PG_TABLE) +
                 ' WHERE ' + PgEscape.ident(PG_UID_COLUMN) + ' IN (' + params.join(',') + ')',
                 chunk,
                 (err, res) => {
@@ -280,7 +310,7 @@ let deleteAfterIndex = function(event_ids) {
 let deleteAfterHistoricAuditProcessed = function(lastProcessedEventId) {
     debug('Deleting rows where ' + PG_UID_COLUMN + ' <= ' + lastProcessedEventId);
     let result = pgClient.query(
-        'DELETE FROM ' + PgEscape.ident(PG_DELETE_SCHEMA) + '.' + PgEscape.ident(PG_DELETE_TABLE) +
+        'DELETE FROM ' + PgEscape.ident(PG_SCHEMA) + '.' + PgEscape.ident(PG_TABLE) +
         ' WHERE ' + PgEscape.ident(PG_UID_COLUMN) + ' <= $1',
         [lastProcessedEventId],
         (err, res) => {
@@ -431,5 +461,5 @@ process.on('SIGTERM', function () {
         });
     }).catch(() => {
         error('Unable to close PG connection, unable to quit gracefully')
-    })
+    });
 });
