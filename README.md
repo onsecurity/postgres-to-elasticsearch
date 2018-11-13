@@ -21,6 +21,10 @@ npm install
 ENV_VARIABLES=todo node index.js
 ```
 
+## Environment variables
+
+Please see `src/index.js` for the list of available environment variables.
+
 ## Deployment
 
 The service may be run directly on a host machine or via docker.
