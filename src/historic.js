@@ -19,21 +19,20 @@ let getLastProcessedEventId = async function() {
         let sort = {};
         sort[config.PG_TIMESTAMP_COLUMN] = {"order": "desc"};
 
-        let query = {match_all: {}};
-        if (config.ES_LABEL_NAME && config.ES_LABEL) {
-            query = {term: {}};
-            query.term[config.ES_LABEL_NAME] = config.ES_LABEL;
+        let searchBody = {
+            from: 0,
+            size: 1,
+            sort: [sort]
         }
-        log.debug('Searching for last processed ' + config.PG_UID_COLUMN + ' using query:', query);
+
+        if (config.ES_LABEL_NAME && config.ES_LABEL) {
+            searchBody.query = {term: {[config.ES_LABEL_NAME + '.keyword']: config.ES_LABEL}};
+        }
+        log.debug('Searching for last processed ' + config.PG_UID_COLUMN + ' using searchBody:', searchBody);
 
         es.search({
             index: config.ES_INDEX,
-            body: {
-                query,
-                from: 0,
-                size: 1,
-                sort: [sort]
-            },
+            body: searchBody,
         }).then((res) => {
             if (res.hits.total.value) {
                 log.info('Found last processed ' + config.PG_UID_COLUMN + ': ' + res.hits.hits[0]._source[config.PG_UID_COLUMN]);
