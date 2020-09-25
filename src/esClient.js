@@ -127,7 +127,10 @@ module.exports = {
             indexRow.index["_type"] = config.ES_TYPE;
         }
         indexQueue.push(indexRow);
-        dataQueue.push(data);
+        dataQueue.push({
+            ...data,
+            ...(config.ES_LABEL_NAME && config.ES_LABEL ? {[config.ES_LABEL_NAME]: config.ES_LABEL} : {})
+        });
         if (indexQueue.length >= config.QUEUE_LIMIT) {
             flushQueue().catch(() => {});
         }
