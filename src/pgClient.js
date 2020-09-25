@@ -108,9 +108,6 @@ let loadPgRow = function(event_id) {
 };
 
 let queueRecord = async function(row) {
-    if (config.ES_LABEL_NAME !== null && config.ES_LABEL !== null) {
-        row[config.ES_LABEL_NAME] = config.ES_LABEL;
-    }
     return esClient.queue(row);
 };
 

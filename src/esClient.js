@@ -16,9 +16,17 @@ const client = new Es.Client( {
 });
 
 const bulk = async function(data) {
-    return client.bulk({
-        body: data
-    });
+    return new Promise((accept, reject) => {
+        return client.bulk({
+            body: data
+        }).then(bulkResponse => {
+            if (bulkResponse.errors) {
+                reject()
+            } else {
+                accept();
+            }
+        });
+    })
 };
 
 
@@ -127,10 +135,10 @@ module.exports = {
             indexRow.index["_type"] = config.ES_TYPE;
         }
         indexQueue.push(indexRow);
-        dataQueue.push({
-            ...data,
-            ...(config.ES_LABEL_NAME && config.ES_LABEL ? {[config.ES_LABEL_NAME]: config.ES_LABEL} : {})
-        });
+        if (config.ES_LABEL_NAME !== null && config.ES_LABEL !== null) {
+            data[config.ES_LABEL_NAME] = config.ES_LABEL;
+        }
+        dataQueue.push(data);
         if (indexQueue.length >= config.QUEUE_LIMIT) {
             flushQueue().catch(() => {});
         }
