@@ -100,7 +100,8 @@ const flushQueue = async function() {
 };
 
 const getEsIndex = function() {
-    return config.ES_INDEX + (config.ES_INDEX_DATE_APPENDIX ? (new Date).toISOString().substr(0, 10) : '');
+    return config.ES_INDEX;
+    // + (config.ES_INDEX_DATE_APPENDIX ? (new Date).toISOString().substr(0, 10) : '');
 };
 
 setInterval(() => {
