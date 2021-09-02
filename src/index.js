@@ -49,19 +49,21 @@ esClient.onFlush(async function(indexQueue, dataQueue) {
 process.on('SIGTERM', function () {
     log.log('Received SIGTERM, shutting down');
     log.log('Flushing remaining queue');
-    esClient.flush().then(() => {
-        log.debug('Flushed indexQueue');
-        log.debug('Closing PG connection');
-        pgClient.end().then(() => {
-            log.debug('Closed PG connection');
-            log.log('Exiting gracefully');
-            process.exit(0);
+    esClient.flush()
+        .then(() => {
+            log.debug('Flushed indexQueue');
+            log.debug('Closing PG connection');
+            pgClient.end()
+                .then(() => {
+                    log.debug('Closed PG connection');
+                    log.log('Exiting gracefully');
+                    process.exit(0);
+                }).catch(() => {
+                    log.error('Unable to flush queue, unable to quit gracefully')
+                });
         }).catch(() => {
-            log.error('Unable to flush queue, unable to quit gracefully')
+            log.error('Unable to close PG connection, unable to quit gracefully')
         });
-    }).catch(() => {
-        log.error('Unable to close PG connection, unable to quit gracefully')
-    });
 });
 
 historic.run();

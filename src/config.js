@@ -1,3 +1,10 @@
+const fs = require('fs');
+const path = require('path')
+const dotenv = require('dotenv');
+
+const envPath = fs.existsSync(path.resolve(__dirname + '/../.env')) ? path.resolve(__dirname + '/../.env') : null;
+envPath && dotenv.config(envPath);
+
 let config = {
     DEBUG: parseInt(process.env.DEBUG) || 0 ? true : false, // Show debug + info messages
     INFO: ((parseInt(process.env.DEBUG) || 0) ? 1 : (parseInt(process.env.INFO) || 1)) ? true : false, // Show info messages
@@ -20,9 +27,8 @@ let config = {
     ES_USERNAME: process.env.ES_USERNAME || null,  // The username for the Elasticsearch server
     ES_PASSWORD: process.env.ES_PASSWORD || null,  // The password for the Elasticsearch server
     ES_PROTO: process.env.ES_PROTO || 'https', // The protocol used for the Elasticsearch server connections
-    ES_INDEX: process.env.ES_INDEX || 'audit', // The Elasticsearch index the data should be stored in
+    ES_INDEX_PREFIX: process.env.ES_INDEX || 'audit', // The Elasticsearch index the data should be stored in
     ES_TYPE: process.env.ES_TYPE || '_doc', // The type of the data to be stored in Elasticsearch
-    ES_VERSION: process.env.ES_VERSION || '6.8', // The version of the Elasticsearch server
     ES_MAPPING: process.env.ES_MAPPING ? JSON.parse(process.env.ES_MAPPING) : null,
     QUEUE_LIMIT: process.env.QUEUE_LIMIT || 200, // The maximum number of items that should be queued before pushing to Elasticsearch
     QUEUE_TIMEOUT: process.env.QUEUE_TIMEOUT || 120 // The maximum seconds for an item to be in the queue before it is pushed to Elasticsearch

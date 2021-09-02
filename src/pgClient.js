@@ -81,12 +81,12 @@ let startListener = function() {
     });
     log.debug('PG notification listener created');
 
-    let listenQuery = pgClient.query("LISTEN " + config.PG_LISTEN_TO).then(() => {
+    pgClient.query("LISTEN " + config.PG_LISTEN_TO).then(() => {
         log.info('LISTEN statement completed');
     }).catch((err) => {
-        log.fatal('LISTEN statement failed', onvrdisplaypointerrestricted);
+        log.fatal('LISTEN statement failed');
     });
-    let listenQueryId = pgClient.query("LISTEN " + config.PG_LISTEN_TO_ID).then(() => {
+    pgClient.query("LISTEN " + config.PG_LISTEN_TO_ID).then(() => {
         log.info('LISTEN ID statement completed');
     }).catch((err) => {
         log.fatal('LISTEN ID statement failed', err);
@@ -111,6 +111,22 @@ let queueRecord = async function(row) {
     return esClient.queue(row);
 };
 
+let getAuditedTables = async function() {
+    return new Promise((accept, reject) => {
+        pgClient.query(`SELECT table_name FROM ${PgEscape.ident(config.PG_SCHEMA)}.${PgEscape.ident(config.PG_TABLE)} GROUP BY table_name`)
+            .then(res => {
+                if (res.rowCount) {
+                    const tables = res.rows.map((row) => row.table_name)
+                    return accept(tables);
+                } else {
+                    reject();
+                }
+            }).catch(() => {
+                return reject();
+            })
+    })
+}
+
 module.exports = {
     start: function() {
         connectToPg().then(() => {
@@ -122,5 +138,6 @@ module.exports = {
     },
     end: async function() {
         return pgClient.end();
-    }
+    },
+    getAuditedTables,
 };

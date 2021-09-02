@@ -1,5 +1,5 @@
 const config = require('./config');
-const Es =  require('elasticsearch');
+const { Client } = require('@elastic/elasticsearch')
 const log = require('./log');
 const _ = require('lodash');
 
@@ -9,10 +9,12 @@ let indexQueue = [];
 let dataQueue = [];
 let onFlushCallbacks = [];
 
-const client = new Es.Client( {
-    host: config.ES_PROTO + '://' + (!!config.ES_USERNAME && !!config.ES_PASSWORD ? config.ES_USERNAME + ':' + config.ES_PASSWORD + '@' : '') + config.ES_HOST + ':' + config.ES_PORT,
-    log: config.DEBUG ? 'trace' : null,
-    apiVersion: config.ES_VERSION
+const client = new Client( {
+    node: config.ES_PROTO + '://' + config.ES_HOST + ':' + config.ES_PORT,
+    auth: {
+        username: config.ES_USERNAME,
+        password: config.ES_PASSWORD,
+    },
 });
 
 const bulk = async function(data) {
@@ -20,7 +22,7 @@ const bulk = async function(data) {
         return client.bulk({
             body: data
         }).then(bulkResponse => {
-            if (bulkResponse.errors) {
+            if (bulkResponse.body.errors) {
                 reject()
             } else {
                 accept();
@@ -31,43 +33,38 @@ const bulk = async function(data) {
 
 
 const createIndexIfNotExists = async function(index) {
-    if (creatingEsIndices[index]) {
-        return creatingEsIndices[index];
-    } else {
-        creatingEsIndices[index] = new Promise((accept, reject) => {
-            client.indices.exists({index}).then((exists) => {
-                if (exists) {
+    if (!creatingEsIndices[index]) {
+        creatingEsIndices[index] = new Promise(async (accept, reject) => {
+            try {
+                const { body } = await client.indices.exists({index})
+                if (body) {
                     if (existingEsIndices.indexOf(index) === -1) {
                         existingEsIndices.push(index);
                     }
                     return accept(index);
                 } else {
                     let mappings = {};
-                    if (parseInt(config.ES_VERSION.substr(0, 1)) >= 7) {
                         mappings = config.ES_MAPPING;
-                    } else {
-                        mappings[config.ES_TYPE] = config.ES_MAPPING;
-                    }
-                    client.indices.create({
-                        index,
-                        "body": {mappings}
-                    }).then(() => {
-                        if (existingEsIndices.indexOf(index) === -1) {
-                            existingEsIndices.push(index);
-                        }
-                        return accept(index);
-                    }).catch((err) => {
-                        log.fatal('indices.create(' + index + ') failed.', err);
-                        return reject();
-                    });
+                        client.indices.create({
+                            index,
+                            "body": {mappings}
+                        }).then(() => {
+                            if (existingEsIndices.indexOf(index) === -1) {
+                                existingEsIndices.push(index);
+                            }
+                            return accept(index);
+                        }).catch((err) => {
+                            log.fatal('indices.create(' + index + ') failed.', err);
+                            return reject();
+                        });
                 }
-            }).catch((err) => {
+            } catch (err) {
                 log.fatal('indices.exists(' + index + ') failed.', err);
                 return reject();
-            });
+            }
         });
-        return creatingEsIndices[index];
     }
+    return creatingEsIndices[index];
 };
 
 const flushQueue = async function() {
@@ -84,32 +81,32 @@ const flushQueue = async function() {
         let dataQueueToPush = dataQueue.splice(0, dataQueue.length > config.QUEUE_LIMIT ? config.QUEUE_LIMIT : dataQueue.length);
 
         let uniqueIndexes = _.uniq(_.map(indexQueueToPush, item => item.index._index));
-        for (let i = 0; i < uniqueIndexes.length; i++) {
-            await createIndexIfNotExists(uniqueIndexes[i]);
+        for (const uniqueIndex of uniqueIndexes) {
+            await createIndexIfNotExists(uniqueIndex);
         }
         let bulkData = [];
         for (let i = 0; i < indexQueueToPush.length; i++) {
             bulkData.push(indexQueueToPush[i]);
             bulkData.push(dataQueueToPush[i]);
         }
-        bulk(bulkData).then(() => {
-            log.debug('Successfully indexed ', dataQueueToPush.length, ' items');
-            onFlushCallbacks.forEach((callback) => {
-                callback(indexQueueToPush, dataQueueToPush)
-            });
-            return accept();
-        }).catch((err) => {
-            log.error('Failed to log ', dataQueueToPush.length, ' items', err);
-            dataQueue = dataQueueToPush.concat(dataQueue);
-            indexQueue = indexQueueToPush.concat(indexQueue);
-            return reject();
-        })
+        bulk(bulkData)
+            .then(() => {
+                log.debug('Successfully indexed ', dataQueueToPush.length, ' items');
+                onFlushCallbacks.forEach((callback) => {
+                    callback(indexQueueToPush, dataQueueToPush)
+                });
+                return accept();
+            }).catch((err) => {
+                log.error('Failed to log ', dataQueueToPush.length, ' items', err);
+                dataQueue = dataQueueToPush.concat(dataQueue);
+                indexQueue = indexQueueToPush.concat(indexQueue);
+                return reject();
+            })
     });
 };
 
-const getEsIndex = function() {
-    return config.ES_INDEX;
-    // + (config.ES_INDEX_DATE_APPENDIX ? (new Date).toISOString().substr(0, 10) : '');
+const getEsIndex = function(tableName) {
+    return config.ES_INDEX_PREFIX + '-' + tableName;
 };
 
 setInterval(() => {
@@ -118,34 +115,35 @@ setInterval(() => {
 
 let readyPromise;
 
+const queue = function(data) {
+    let index = getEsIndex(data.table_name);
+
+    let indexRow = {"index": {"_index": index}};
+    indexQueue.push(indexRow);
+    if (config.ES_LABEL_NAME !== null && config.ES_LABEL !== null) {
+        data[config.ES_LABEL_NAME] = config.ES_LABEL;
+    }
+    dataQueue.push(data);
+    if (indexQueue.length >= config.QUEUE_LIMIT) {
+        flushQueue().catch(() => {});
+    }
+}
+
 module.exports = {
     ready: async function() {
         if (readyPromise === undefined) {
-            readyPromise = client.ping({requestTimeout: 30000});
+            readyPromise = client.ping({}, {requestTimeout: 30000});
         }
         return readyPromise;
     },
     client: function() {
         return client;
     },
-    queue: function(data) {
-        let index = getEsIndex();
-        let indexRow = {"index": {"_index": index}};
-        if (parseInt(config.ES_VERSION.substr(0, 1)) < 7) {
-            indexRow.index["_type"] = config.ES_TYPE;
-        }
-        indexQueue.push(indexRow);
-        if (config.ES_LABEL_NAME !== null && config.ES_LABEL !== null) {
-            data[config.ES_LABEL_NAME] = config.ES_LABEL;
-        }
-        dataQueue.push(data);
-        if (indexQueue.length >= config.QUEUE_LIMIT) {
-            flushQueue().catch(() => {});
-        }
-    },
+    queue: queue,
     createIndexIfNotExists: createIndexIfNotExists,
     flush: flushQueue,
     onFlush: function(callback) {
         onFlushCallbacks.push(callback);
-    }
+    },
+    getEsIndex,
 };

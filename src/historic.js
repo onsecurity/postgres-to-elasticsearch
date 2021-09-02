@@ -5,15 +5,18 @@ const esClient = require('./esClient'),
     Cursor = require('pg-cursor'),
     PgEscape = require('pg-escape');
 
-// let pg = await pgClient.client();
-
-// await esClient.ready();
-// let es = esClient.client();
-
 let getLastProcessedEventId = async function() {
     return new Promise(async (accept, reject) => {
-        await esClient.ready();
-        await esClient.createIndexIfNotExists(config.ES_INDEX);
+        try {
+            await esClient.ready();
+            const tables = await pgClient.getAuditedTables()
+            createPromises = tables.map(table => esClient.createIndexIfNotExists(esClient.getEsIndex(table)))
+            await Promise.all(createPromises);
+        } catch (err) {
+            log.error(err.message)
+            log.debug(err.stack)
+            log.fatal("Failed initialising esClient")
+        }
         let es = esClient.client();
         log.debug('Searching for last processed ' + config.PG_UID_COLUMN);
         let sort = {};
@@ -31,12 +34,12 @@ let getLastProcessedEventId = async function() {
         log.debug('Searching for last processed ' + config.PG_UID_COLUMN + ' using searchBody:', searchBody);
 
         es.search({
-            index: config.ES_INDEX,
+            index: `${config.ES_INDEX_PREFIX}*`,
             body: searchBody,
         }).then((res) => {
-            if (res.hits.total.value) {
-                log.info('Found last processed ' + config.PG_UID_COLUMN + ': ' + res.hits.hits[0]._source[config.PG_UID_COLUMN]);
-                accept(res.hits.hits[0]._source[config.PG_UID_COLUMN]);
+            if (res.body.hits.total.value) {
+                log.info('Found last processed ' + config.PG_UID_COLUMN + ': ' + res.body.hits.hits[0]._source[config.PG_UID_COLUMN]);
+                accept(res.body.hits.hits[0]._source[config.PG_UID_COLUMN]);
             } else {
                 log.info('No historic audit found, cannot get last processed ' + config.PG_UID_COLUMN);
                 reject('No historic audit');
@@ -80,21 +83,25 @@ let insertHistoricAudit = function(cursor) {
 
 let deleteAfterHistoricAuditProcessed = async function(lastProcessedEventId) {
     return new Promise(async (accept, reject) => {
-        log.debug('Deleting rows where ' + config.PG_UID_COLUMN + ' <= ' + lastProcessedEventId);
-        let pg = await pgClient.client();
-        pg.query(
-            'DELETE FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) +
-            ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' <= $1',
-            [lastProcessedEventId],
-            (err, res) => {
-                if (err) {
-                    log.error('Error when deleting rows from database', err);
-                    return reject();
+        if (config.PG_DELETE_ON_INDEX) {
+            log.debug('Deleting rows where ' + config.PG_UID_COLUMN + ' <= ' + lastProcessedEventId);
+            let pg = await pgClient.client();
+            pg.query(
+                'DELETE FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) +
+                ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' <= $1',
+                [lastProcessedEventId],
+                (err, res) => {
+                    if (err) {
+                        log.error('Error when deleting rows from database', err);
+                        return reject();
+                    }
+                    log.info('Deleted a total of ' + res.rowCount + ' rows');
+                    return accept();
                 }
-                log.info('Deleted a total of ' + res.rowCount + ' rows');
-                return accept();
-            }
-        );
+            );
+        } else {
+            return accept();
+        }
     });
 };
 
@@ -121,7 +128,7 @@ let processHistoricAudit = async function() {
 module.exports = {
     run: async function() {
         pgClient.client().then(async () => {
-            processHistoricAudit();
+            await processHistoricAudit();
         });
     }
 };
