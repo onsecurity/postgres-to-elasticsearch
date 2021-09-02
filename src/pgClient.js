@@ -134,10 +134,14 @@ module.exports = {
         })
     },
     client: async function() {
-        return connectToPg();
+        return await connectToPg();
     },
     end: async function() {
-        return pgClient.end();
+        try {
+            return await pgClient.end();
+        } catch(err) {
+            log.error("Error while closing pgClient");
+        }
     },
     getAuditedTables,
 };

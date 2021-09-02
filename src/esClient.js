@@ -90,11 +90,11 @@ const flushQueue = async function() {
             bulkData.push(dataQueueToPush[i]);
         }
         bulk(bulkData)
-            .then(() => {
+            .then(async () => {
                 log.debug('Successfully indexed ', dataQueueToPush.length, ' items');
-                onFlushCallbacks.forEach((callback) => {
-                    callback(indexQueueToPush, dataQueueToPush)
-                });
+                for (const callback of onFlushCallbacks) {
+                    await callback(indexQueueToPush, dataQueueToPush).catch(err => log.error(err))
+                }
                 return accept();
             }).catch((err) => {
                 log.error('Failed to log ', dataQueueToPush.length, ' items', err);
@@ -109,7 +109,7 @@ const getEsIndex = function(tableName) {
     return config.ES_INDEX_PREFIX + '-' + tableName;
 };
 
-setInterval(() => {
+const flushInterval = setInterval(() => {
     flushQueue().catch(() => {});
 }, config.QUEUE_TIMEOUT * 1000);
 
@@ -146,4 +146,5 @@ module.exports = {
         onFlushCallbacks.push(callback);
     },
     getEsIndex,
+    clearInterval: () => clearInterval(flushInterval),
 };

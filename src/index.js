@@ -16,54 +16,49 @@ esClient.onFlush(async function(indexQueue, dataQueue) {
             log.debug('Deleting ' + eventIds.length + ' rows after index');
             let chunks = _.chunk(eventIds, 34464);
             log.debug('Chunked ' + eventIds.length + ' rows into ' + chunks.length + ' chunks.');
-            chunks.forEach((chunk, index) => {
-
+            for (const [index, chunk] of chunks.entries()) {
                 let params = [];
                 for (let paramId = 1; paramId <= chunk.length; paramId++) {
                     params.push('$' + paramId);
                 }
-
-                pg.query(
-                    'DELETE FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) +
-                    ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' IN (' + params.join(',') + ')',
-                    chunk,
-                    (err, res) => {
-                        if (err) {
-                            log.error('Error when deleting rows from database', err);
-                            reject();
-                            return;
-                        }
-                        log.info('Attempted to delete ' + chunk.length + ' rows, actually deleted ' + res.rowCount + ' rows');
-                        if (index === chunks.length - 1) {
-                            accept();
-                        }
+                try {
+                    const { rowCount } = await pg.query(
+                        'DELETE FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) +
+                        ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' IN (' + params.join(',') + ')',
+                        chunk);
+                    log.info('Attempted to delete ' + chunk.length + ' rows, actually deleted ' + rowCount + ' rows');
+                    if (index === chunks.length - 1) {
+                        accept();
                     }
-                );
-            });
+                } catch(err) {
+                    log.error('Error when deleting rows from database', err);
+                    reject();
+                    return;
+                }
+            }
         } else {
             return accept();
         }
     });
 });
 
-process.on('SIGTERM', function () {
+process.on('SIGTERM', async function () {
     log.log('Received SIGTERM, shutting down');
     log.log('Flushing remaining queue');
-    esClient.flush()
-        .then(() => {
-            log.debug('Flushed indexQueue');
-            log.debug('Closing PG connection');
-            pgClient.end()
-                .then(() => {
-                    log.debug('Closed PG connection');
-                    log.log('Exiting gracefully');
-                    process.exit(0);
-                }).catch(() => {
-                    log.error('Unable to flush queue, unable to quit gracefully')
-                });
-        }).catch(() => {
-            log.error('Unable to close PG connection, unable to quit gracefully')
-        });
+    esClient.clearInterval();
+    try {
+        await esClient.flush()
+        log.debug('Flushed indexQueue');
+
+        log.debug('Closing PG connection');
+        await pgClient.end()
+        log.debug('Closed PG connection');
+        
+        log.log('Exiting gracefully');
+        process.exit(0);
+    } catch (err) {
+        log.error('Unable to quit gracefully')
+    }
 });
 
 historic.run();

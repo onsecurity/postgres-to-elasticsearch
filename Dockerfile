@@ -1,5 +1,7 @@
 FROM node:12-alpine
-COPY src /src
-WORKDIR /src
-RUN npm install
-ENTRYPOINT ["/usr/local/bin/node", "index.js"]
+WORKDIR /app
+COPY ["package.json", "package-lock.json", "/app/"]
+RUN npm ci
+
+COPY ["src/", "/app/src/"]
+ENTRYPOINT ["/usr/local/bin/node", "src/index.js"]
