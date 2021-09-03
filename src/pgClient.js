@@ -1,6 +1,5 @@
 const _ = require('lodash');
 const Pg = require('pg');
-const Cursor = require('pg-cursor');
 const PgEscape = require('pg-escape');
 const config = require('./config');
 const log = require('./log');
@@ -119,7 +118,7 @@ let getAuditedTables = async function() {
                     const tables = res.rows.map((row) => row.table_name)
                     return accept(tables);
                 } else {
-                    reject();
+                    accept([]);
                 }
             }).catch(() => {
                 return reject();

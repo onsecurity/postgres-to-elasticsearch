@@ -26,7 +26,7 @@ esClient.onFlush(async function(indexQueue, dataQueue) {
                         'DELETE FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) +
                         ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' IN (' + params.join(',') + ')',
                         chunk);
-                    log.info('Attempted to delete ' + chunk.length + ' rows, actually deleted ' + rowCount + ' rows');
+                    log.debug('Attempted to delete ' + chunk.length + ' rows, actually deleted ' + rowCount + ' rows');
                     if (index === chunks.length - 1) {
                         accept();
                     }
@@ -42,14 +42,14 @@ esClient.onFlush(async function(indexQueue, dataQueue) {
     });
 });
 
-process.on('SIGTERM', async function () {
+const exit = async () => {
     log.log('Received SIGTERM, shutting down');
     log.log('Flushing remaining queue');
     esClient.clearInterval();
     try {
         await esClient.flush()
         log.debug('Flushed indexQueue');
-
+    
         log.debug('Closing PG connection');
         await pgClient.end()
         log.debug('Closed PG connection');
@@ -59,7 +59,16 @@ process.on('SIGTERM', async function () {
     } catch (err) {
         log.error('Unable to quit gracefully')
     }
-});
+}
 
-historic.run();
-pgClient.start();
+process.on('SIGTERM', exit);
+process.on('SIGINT', exit);
+
+historic.run()
+    .then(() => {
+        pgClient.start();
+        esClient.begin()
+    })
+    .catch(err => {
+        log.fatal("Error processing historic")
+    });

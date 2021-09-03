@@ -31,7 +31,8 @@ let config = {
     ES_TYPE: process.env.ES_TYPE || '_doc', // The type of the data to be stored in Elasticsearch
     ES_MAPPING: process.env.ES_MAPPING ? JSON.parse(process.env.ES_MAPPING) : null,
     QUEUE_LIMIT: process.env.QUEUE_LIMIT || 200, // The maximum number of items that should be queued before pushing to Elasticsearch
-    QUEUE_TIMEOUT: process.env.QUEUE_TIMEOUT || 120 // The maximum seconds for an item to be in the queue before it is pushed to Elasticsearch
+    QUEUE_TIMEOUT: process.env.QUEUE_TIMEOUT || 120, // The maximum seconds for an item to be in the queue before it is pushed to Elasticsearch
+    LOG_TIMESTAMP: parseInt(process.env.LOG_TIMESTAMP) || 0
 };
 
 if (config.ES_MAPPING === null) {

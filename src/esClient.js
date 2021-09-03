@@ -18,16 +18,18 @@ const client = new Client( {
 });
 
 const bulk = async function(data) {
-    return new Promise((accept, reject) => {
-        return client.bulk({
-            body: data
-        }).then(bulkResponse => {
-            if (bulkResponse.body.errors) {
+    return new Promise(async (accept, reject) => {
+        try {
+            const response = await client.bulk({body: data})
+            if (response.body.errors) {
                 reject()
             } else {
                 accept();
             }
-        });
+        } catch (err) {
+            log.info("Error running bulk operation")
+            log.error(err)
+        }
     })
 };
 
@@ -89,19 +91,20 @@ const flushQueue = async function() {
             bulkData.push(indexQueueToPush[i]);
             bulkData.push(dataQueueToPush[i]);
         }
-        bulk(bulkData)
-            .then(async () => {
-                log.debug('Successfully indexed ', dataQueueToPush.length, ' items');
-                for (const callback of onFlushCallbacks) {
-                    await callback(indexQueueToPush, dataQueueToPush).catch(err => log.error(err))
-                }
-                return accept();
-            }).catch((err) => {
-                log.error('Failed to log ', dataQueueToPush.length, ' items', err);
-                dataQueue = dataQueueToPush.concat(dataQueue);
-                indexQueue = indexQueueToPush.concat(indexQueue);
-                return reject();
-            })
+
+        try {
+            await bulk(bulkData)
+            log.debug('Successfully indexed ', dataQueueToPush.length, ' items');
+            for (const callback of onFlushCallbacks) {
+                await callback(indexQueueToPush, dataQueueToPush).catch(err => log.error(err))
+            }
+            return accept();
+        } catch (err) {
+            log.error('Failed to log ', dataQueueToPush.length, ' items', err);
+            dataQueue = dataQueueToPush.concat(dataQueue);
+            indexQueue = indexQueueToPush.concat(indexQueue);
+            return reject();
+        }
     });
 };
 
@@ -109,13 +112,17 @@ const getEsIndex = function(tableName) {
     return config.ES_INDEX_PREFIX + '-' + tableName;
 };
 
-const flushInterval = setInterval(() => {
-    flushQueue().catch(() => {});
-}, config.QUEUE_TIMEOUT * 1000);
+let flushInterval
+const beginInterval = () => {
+    flushInterval = setInterval(() => {
+        log.debug("Flushing at interval");
+        flushQueue().catch(() => {});
+    }, config.QUEUE_TIMEOUT * 1000);
+}
 
 let readyPromise;
 
-const queue = function(data) {
+const queue = async function(data) {
     let index = getEsIndex(data.table_name);
 
     let indexRow = {"index": {"_index": index}};
@@ -125,7 +132,7 @@ const queue = function(data) {
     }
     dataQueue.push(data);
     if (indexQueue.length >= config.QUEUE_LIMIT) {
-        flushQueue().catch(() => {});
+        await flushQueue().catch(() => {});
     }
 }
 
@@ -146,5 +153,6 @@ module.exports = {
         onFlushCallbacks.push(callback);
     },
     getEsIndex,
+    begin: beginInterval,
     clearInterval: () => clearInterval(flushInterval),
 };
