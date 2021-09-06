@@ -5,6 +5,16 @@ const esClient = require('./esClient'),
     Cursor = require('./cursor'),
     PgEscape = require('pg-escape');
 
+const getIndexSearchTerm = () => {
+    let index = '';
+    if (config.ES_INDEX_PREFIX) {
+        index += config.ES_INDEX_PREFIX + '-'
+    }
+    index += '*'
+    log.debug(index)
+    return index
+}
+
 let getLastProcessedEventId = async function() {
     return new Promise(async (accept, reject) => {
         try {
@@ -35,7 +45,7 @@ let getLastProcessedEventId = async function() {
 
         try {
             const searchResult = await es.search({
-                index: `${config.ES_INDEX_PREFIX}*`,
+                index: getIndexSearchTerm(),
                 body: searchBody,
             })
             if (searchResult.body.hits.total.value) {
