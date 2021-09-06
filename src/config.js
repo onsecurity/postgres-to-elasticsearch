@@ -28,6 +28,7 @@ let config = {
     ES_PASSWORD: process.env.ES_PASSWORD || null,  // The password for the Elasticsearch server
     ES_PROTO: process.env.ES_PROTO || 'https', // The protocol used for the Elasticsearch server connections
     ES_INDEX_PREFIX: process.env.ES_INDEX || 'audit', // The Elasticsearch index the data should be stored in
+    ES_INDEX_DATE_SUFFIX_FORMAT: process.env.ES_INDEX_DATE_SUFFIX_FORMAT || null, // moment date form to create index suffix from
     ES_TYPE: process.env.ES_TYPE || '_doc', // The type of the data to be stored in Elasticsearch
     ES_MAPPING: process.env.ES_MAPPING ? JSON.parse(process.env.ES_MAPPING) : null,
     QUEUE_LIMIT: process.env.QUEUE_LIMIT || 200, // The maximum number of items that should be queued before pushing to Elasticsearch

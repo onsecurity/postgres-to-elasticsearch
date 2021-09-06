@@ -1,7 +1,9 @@
-const config = require('./config');
 const { Client } = require('@elastic/elasticsearch')
-const log = require('./log');
 const _ = require('lodash');
+const moment = require('moment')
+
+const config = require('./config');
+const log = require('./log');
 
 let existingEsIndices = [];
 let creatingEsIndices = {};
@@ -109,7 +111,16 @@ const flushQueue = async function() {
 };
 
 const getEsIndex = function(tableName) {
-    return config.ES_INDEX_PREFIX + '-' + tableName;
+    let index = '';
+    if (config.ES_INDEX_PREFIX) {
+        index += config.ES_INDEX_PREFIX + '-'
+    }
+    index+= tableName
+    if (config.ES_INDEX_DATE_SUFFIX_FORMAT) {
+        const dateString = moment().format(config.ES_INDEX_DATE_SUFFIX_FORMAT)
+        index+= '-' + dateString
+    }
+    return index
 };
 
 let flushInterval
