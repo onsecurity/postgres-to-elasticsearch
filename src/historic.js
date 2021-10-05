@@ -37,11 +37,8 @@ let getLastProcessedEventId = async function() {
             size: 1,
             sort: [sort]
         }
-
-        if (config.ES_LABEL_NAME && config.ES_LABEL) {
-            searchBody.query = {term: {[config.ES_LABEL_NAME + '.keyword']: config.ES_LABEL}};
-        }
-        log.debug('Searching for last processed ' + config.PG_UID_COLUMN + ' using searchBody:', searchBody);
+        
+        log.debug('Searching for last processed ' + config.PG_UID_COLUMN + ' using searchBody:', JSON.stringify(searchBody, null, 2));
 
         try {
             const searchResult = await es.search({
@@ -53,6 +50,7 @@ let getLastProcessedEventId = async function() {
                 log.info('Found last processed ' + config.PG_UID_COLUMN + ': ' + hit._source[config.PG_UID_COLUMN]);
                 accept(hit._source[config.PG_UID_COLUMN]);
             } else {
+                log.debug(searchResult.body);
                 log.info('No historic audit found, cannot get last processed ' + config.PG_UID_COLUMN);
                 reject('No historic audit');
             }
