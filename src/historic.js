@@ -64,7 +64,8 @@ let getLastProcessedEventId = async function() {
 let insertHistoricAudit = async function(cursor) {
     let processedRows = 0;
     let highestEventId = null;
-
+    // const originalPgDeleteOnIndex = config.PG_DELETE_ON_INDEX;
+    // config.PG_DELETE_ON_INDEX = 0; // disable as this is deleted after in 1 bulk request
     let rows = await cursor.readAsync(config.QUEUE_LIMIT)
     if (rows.length) {
         while (rows.length) {
@@ -76,24 +77,27 @@ let insertHistoricAudit = async function(cursor) {
             }
     
             processedRows += rows.length;
-    
+            log.info('Processed ' + processedRows + ' historic rows...');
             rows = await cursor.readAsync(config.QUEUE_LIMIT)
         }
         log.info('No more historic rows to process, processed a total of ' + processedRows + ' rows');
     } else {
         log.info('No historic rows to process');
     }
+    // config.PG_DELETE_ON_INDEX = originalPgDeleteOnIndex;
+    return highestEventId;
 };
 
-let deleteAfterHistoricAuditProcessed = async function(lastProcessedEventId) {
+let deleteAfterHistoricAuditProcessed = async function(lastIndexedEventId, lastProcessedEventId) {
     return new Promise(async (accept, reject) => {
         if (config.PG_DELETE_ON_INDEX) {
-            log.debug('Deleting rows where ' + config.PG_UID_COLUMN + ' <= ' + lastProcessedEventId);
+            log.debug('Deleting rows where ' + config.PG_UID_COLUMN + ' > ' + lastIndexedEventId + ' and <= ' + lastProcessedEventId);
             let pg = await pgClient.client();
             pg.query(
                 'DELETE FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) +
-                ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' <= $1',
-                [lastProcessedEventId],
+                ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' > $1' +
+                ' AND ' + PgEscape.ident(config.PG_UID_COLUMN) + ' <= $2',
+                [lastIndexedEventId, lastProcessedEventId],
                 (err, res) => {
                     if (err) {
                         log.error('Error when deleting rows from database', err);
@@ -113,19 +117,21 @@ let deleteAfterHistoricAuditProcessed = async function(lastProcessedEventId) {
 let processHistoricAudit = async function() {
     return new Promise(async (accept, reject) => {
         log.info('Processing historic audit');
-        let pg = await pgClient.client();
+        let lastEventIdIndexed = 0;
+        let pg = await pgClient.client('historic');
         try {
-            const event_id = await getLastProcessedEventId();
-            const cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' > $1', [event_id]));
+            lastEventIdIndexed = await getLastProcessedEventId();
+            const cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' > $1 ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC', [lastEventIdIndexed]));
             log.info('Historic audit query completed, processing...');
-            await insertHistoricAudit(cursor);
-            deleteAfterHistoricAuditProcessed(event_id);
+            const lastProcessedEventId = await insertHistoricAudit(cursor);
+            // await deleteAfterHistoricAuditProcessed(lastEventIdIndexed, lastProcessedEventId);
             return accept()
         } catch (err) {
             log.info('Loading all available audit data for backlog processing');
-            const cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE)));
+            const cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC'));
             log.info('Historic audit query completed, processing...');
-            await insertHistoricAudit(cursor);
+            const lastProcessedEventId = await insertHistoricAudit(cursor);
+            // await deleteAfterHistoricAuditProcessed(lastEventIdIndexed, lastProcessedEventId);
             return accept();
         }
     })

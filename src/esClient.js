@@ -10,6 +10,7 @@ let creatingEsIndices = {};
 let indexQueue = [];
 let dataQueue = [];
 let onFlushCallbacks = [];
+let currentFlushPromise = null;
 
 const client = new OsClient({
     node: config.ES_PROTO + '://' + config.ES_HOST + ':' + config.ES_PORT,
@@ -75,7 +76,7 @@ const createIndexIfNotExists = async function(index) {
 };
 
 const flushQueue = async function() {
-    return new Promise(async (accept, reject) => {
+    currentFlushPromise = new Promise(async (accept, reject) => {
         if (!dataQueue.length) {
             log.debug('Skipping flushQueue, no items');
             return accept();
@@ -111,6 +112,7 @@ const flushQueue = async function() {
             return reject();
         }
     });
+    return currentFlushPromise;
 };
 
 const getEsIndex = function(tableName) {
@@ -130,7 +132,7 @@ let flushInterval
 const beginInterval = () => {
     flushInterval = setInterval(() => {
         log.debug("Flushing at interval");
-        flushQueue().catch(() => {});
+        flushQueue();
     }, config.QUEUE_TIMEOUT * 1000);
 }
 
@@ -146,7 +148,7 @@ const queue = async function(data) {
     }
     dataQueue.push(data);
     if (indexQueue.length >= config.QUEUE_LIMIT) {
-        await flushQueue().catch(() => {});
+        await flushQueue();
     }
 }
 
@@ -165,6 +167,9 @@ module.exports = {
     flush: flushQueue,
     onFlush: function(callback) {
         onFlushCallbacks.push(callback);
+    },
+    waitForFlush: async function() {
+        return new Promise(accept => currentFlushPromise === null ? accept() : currentFlushPromise.then(() => accept()));
     },
     getEsIndex,
     begin: beginInterval,
