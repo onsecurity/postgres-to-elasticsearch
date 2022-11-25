@@ -66,17 +66,21 @@ let insertHistoricAudit = async function(cursor) {
     let highestEventId = null;
     let rows = await cursor.readAsync(config.QUEUE_LIMIT)
     if (rows.length) {
-        while (rows.length) {
-            for (const row of rows) {
-                if (row[config.PG_UID_COLUMN] > highestEventId || highestEventId === null) {
-                    highestEventId = parseInt(row[config.PG_UID_COLUMN]);
+        try {
+            while (rows.length) {
+                for (const row of rows) {
+                    if (row[config.PG_UID_COLUMN] > highestEventId || highestEventId === null) {
+                        highestEventId = parseInt(row[config.PG_UID_COLUMN]);
+                    }
+                    await esClient.queue(row);
                 }
-                await esClient.queue(row);
+
+                processedRows += rows.length;
+                log.info('Processed ' + processedRows + ' historic rows...');
+                rows = await cursor.readAsync(config.QUEUE_LIMIT)
             }
-    
-            processedRows += rows.length;
-            log.info('Processed ' + processedRows + ' historic rows...');
-            rows = await cursor.readAsync(config.QUEUE_LIMIT)
+        } catch (err) {
+            log.error('Failed to store historic data', err);
         }
         log.info('No more historic rows to process, processed a total of ' + processedRows + ' rows');
     } else {
@@ -90,18 +94,21 @@ let processHistoricAudit = async function() {
         log.info('Processing historic audit');
         let lastEventIdIndexed = 0;
         let pg = await pgClient.client('historic');
+        let cursor;
         try {
             lastEventIdIndexed = await getLastProcessedEventId();
-            const cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' > $1 ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC', [lastEventIdIndexed]));
-            log.info('Historic audit query completed, processing...');
-            await insertHistoricAudit(cursor);
-            return accept()
+            cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' > $1 ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC', [lastEventIdIndexed]));
         } catch (err) {
             log.info('Loading all available audit data for backlog processing');
-            const cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC'));
-            log.info('Historic audit query completed, processing...');
-            await insertHistoricAudit(cursor);
-            return accept();
+            cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC'));
+        }
+        try {
+                log.info('Historic audit query completed, processing...');
+                await insertHistoricAudit(cursor);
+                return accept()
+        } catch (err) {
+            log.error('Process historic audit failed', err);
+            return reject();
         }
     })
 };

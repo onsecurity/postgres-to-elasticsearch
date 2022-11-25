@@ -1,9 +1,11 @@
 const { Client: OsClient } = require('@opensearch-project/opensearch');
 const _ = require('lodash');
 const moment = require('moment')
-
 const config = require('../config');
 const log = require('./log');
+const PQueue = import('p-queue');
+
+let bulkQueue = null;
 
 let existingEsIndices = [];
 let creatingEsIndices = {};
@@ -20,18 +22,32 @@ const client = new OsClient({
     }
 });
 
+const getBulkQueue = async function () {
+    if (bulkQueue === null) {
+        let PQueueConstructor = (await PQueue).default;
+        bulkQueue = new PQueueConstructor({
+            concurrency: 1,
+            throwOnTimeout: true,
+            intervalCap: 5, // 5 per 10 seconds
+            interval: 10000
+        });
+    }
+    return bulkQueue;
+}
+
 const bulk = async function(data) {
     return new Promise(async (accept, reject) => {
         try {
-            const response = await client.bulk({body: data})
+            const response = await (await getBulkQueue()).add(() => client.bulk({body: data}));
             if (response.body.errors) {
-                reject()
+                log.error("Error running bulk operation", response.body.errors)
+                reject(response.body.errors)
             } else {
                 accept();
             }
         } catch (err) {
-            log.info("Error running bulk operation")
-            log.error(err)
+            log.error("Error running bulk operation", err)
+            reject();
         }
     })
 };
@@ -99,7 +115,14 @@ const flushQueue = async function() {
         }
 
         try {
-            await bulk(bulkData)
+            if (config.ES_MAX_POST_SIZE && JSON.stringify(bulkData).length > config.ES_MAX_POST_SIZE) {
+                log.info('Bulk post size is too large, splitting into chunks');
+                for (let chunk of _.chunk(bulkData, 2)) {
+                    await bulk(chunk);
+                }
+            } else {
+                await bulk(bulkData);
+            }
             log.debug('Successfully indexed ', dataQueueToPush.length, ' items');
             for (const callback of onFlushCallbacks) {
                 await callback(indexQueueToPush, dataQueueToPush).catch(err => log.error(err))
@@ -147,7 +170,7 @@ const queue = async function(data) {
         data[config.ES_LABEL_NAME] = config.ES_LABEL;
     }
     dataQueue.push(data);
-    if (indexQueue.length >= config.QUEUE_LIMIT) {
+    if (indexQueue.length >= config.QUEUE_LIMIT || (config.ES_MAX_POST_SIZE && JSON.stringify(dataQueue).length > config.ES_MAX_POST_SIZE)) {
         await flushQueue();
     }
 }
