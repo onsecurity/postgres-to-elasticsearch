@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path')
 const dotenv = require('dotenv');
 
-const envPath = fs.existsSync(path.resolve(__dirname + '/../.env')) ? path.resolve(__dirname + '/../.env') : null;
+const envPath = fs.existsSync(path.resolve(__dirname + '/.env')) ? path.resolve(__dirname + '/.env') : null;
 envPath && dotenv.config(envPath);
 
 let config = {
@@ -17,7 +17,7 @@ let config = {
     PG_PORT: process.env.PG_PORT || 5432, // The port that the PostgreSQL database is listening on
     PG_TIMESTAMP_COLUMN: process.env.PG_TIMESTAMP_COLUMN || 'action_timestamp', // The column of the row that is used as the timestamp for Elasticsearch
     PG_UID_COLUMN: process.env.PG_UID_COLUMN || 'event_id', // The primary key column of the row that is stored in Elasticsearch
-    PG_DELETE_ON_INDEX: parseInt(process.env.PG_DELETE_ON_INDEX) || 0, // Delete the rows in PostgreSQL after they have been indexed to Elasticsearch
+    PG_DELETE_ON_INDEX: process.env.hasOwnProperty('PG_DELETE_ON_INDEX') ? parseInt(process.env.PG_DELETE_ON_INDEX) : 0, // Delete the rows in PostgreSQL after they have been indexed to Elasticsearch
     PG_SCHEMA: process.env.PG_SCHEMA || 'audit', // The schema of the table which rows which will be deleted from PG_DELETE_ON_INDEX
     PG_TABLE: process.env.PG_TABLE || 'logged_actions', // The table name which rows will be deleted from by PG_DELETE_ON_INDEX
     ES_LABEL_NAME: process.env.ES_LABEL_NAME || null,
@@ -35,14 +35,5 @@ let config = {
     QUEUE_TIMEOUT: process.env.QUEUE_TIMEOUT || 120, // The maximum seconds for an item to be in the queue before it is pushed to Elasticsearch
     LOG_TIMESTAMP: parseInt(process.env.LOG_TIMESTAMP) || 0
 };
-
-if (config.ES_MAPPING === null) {
-    let mapping = {};
-    mapping = {"properties": {}};
-    mapping.properties[config.PG_TIMESTAMP_COLUMN] = {"type": "date"};
-    mapping.properties[config.PG_UID_COLUMN] = {"type": "long"};
-    mapping.properties[config.ES_LABEL_NAME] = {"type": "keyword"};
-    config.ES_MAPPING = mapping;
-}
 
 module.exports = config;

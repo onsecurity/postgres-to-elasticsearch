@@ -1,7 +1,7 @@
-FROM node:12-alpine
+FROM node:18-alpine
 WORKDIR /app
 COPY ["package.json", "package-lock.json", "/app/"]
 RUN npm ci
 
-COPY ["src/", "/app/src/"]
-ENTRYPOINT ["/usr/local/bin/node", "src/index.js"]
+COPY ["./", "/app/"]
+ENTRYPOINT ["/usr/local/bin/node", "index.js"]

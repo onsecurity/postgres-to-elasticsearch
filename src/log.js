@@ -1,5 +1,5 @@
 const moment = require("moment");
-const config = require("./config");
+const config = require("../config");
 
 const timestamp = () => config.LOG_TIMESTAMP ? `[${moment().format('YYYY-MM-DD HH:mm:ss')}]` : ''
 

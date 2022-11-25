@@ -1,10 +1,10 @@
 const _ = require('lodash'),
     config = require('./config'),
-    esClient = require('./esClient'),
-    pgClient = require('./pgClient'),
-    historic = require('./historic'),
+    esClient = require('./src/esClient'),
+    pgClient = require('./src/pgClient'),
+    historic = require('./src/historic'),
     PgEscape = require('pg-escape'),
-    log = require('./log');
+    log = require('./src/log');
 
 
 esClient.onFlush(async function(indexQueue, dataQueue) {

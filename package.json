@@ -4,12 +4,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "watch": "nodemon index.js"
+    "watch": "nodemon index.js",
+    "watch-insecure": "NODE_TLS_REJECT_UNAUTHORIZED=0 nodemon index.js"
   },
   "author": "Tom Lindley",
   "license": "GPL-3.0",
   "dependencies": {
-    "@elastic/elasticsearch": "~7.10.0",
+    "@opensearch-project/opensearch": "^2.1.0",
     "dotenv": "^10.0.0",
     "lodash": "^4.17.20",
     "moment": "^2.29.1",

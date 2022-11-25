@@ -1,7 +1,7 @@
 const _ = require('lodash');
 const Pg = require('pg');
 const PgEscape = require('pg-escape');
-const config = require('./config');
+const config = require('../config');
 const log = require('./log');
 const esClient = require('./esClient');
 
@@ -69,32 +69,35 @@ let startListener = function() {
     pgClient.on('notification', function (msg) {
         log.debug('Received notification on ' + msg.channel, msg.payload);
         if (msg.channel === config.PG_LISTEN_TO) {
+            log.debug('Queuing item from ' + config.PG_LISTEN_TO);
             queueRecord(JSON.parse(msg.payload));
         } else if (msg.channel === config.PG_LISTEN_TO_ID) {
+            log.debug('Queuing big item ' + msg.payload);
             loadPgRow(parseInt(msg.payload)).then((row) => {
                 queueRecord(row);
-            }).catch(() => {
+            }).catch((err) => {
                 log.error('Unable to load row from database, id: ', msg.payload);
+                log.error(err);
             })
         }
     });
     log.debug('PG notification listener created');
 
     pgClient.query("LISTEN " + config.PG_LISTEN_TO).then(() => {
-        log.info('LISTEN statement completed');
+        log.info('LISTEN ' + config.PG_LISTEN_TO + ' statement completed');
     }).catch((err) => {
-        log.fatal('LISTEN statement failed');
+        log.fatal('LISTEN ' + config.PG_LISTEN_TO + ' statement failed');
     });
     pgClient.query("LISTEN " + config.PG_LISTEN_TO_ID).then(() => {
-        log.info('LISTEN ID statement completed');
+        log.info('LISTEN ' + config.PG_LISTEN_TO_ID + ' statement completed');
     }).catch((err) => {
-        log.fatal('LISTEN ID statement failed', err);
+        log.fatal('LISTEN ' + config.PG_LISTEN_TO_ID + ' statement failed', err);
     });
 };
 
 let loadPgRow = function(event_id) {
     return new Promise((accept, reject) => {
-        pgClient.query('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' > $1', [event_id]).then((res) => {
+        pgClient.query('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' = $1', [event_id]).then((res) => {
             if (res.rowCount) {
                 return accept(res.rows[0]);
             } else {

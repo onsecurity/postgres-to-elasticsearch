@@ -1,6 +1,6 @@
 const esClient = require('./esClient'),
     pgClient = require('./pgClient'),
-    config = require('./config'),
+    config = require('../config'),
     log = require('./log'),
     Cursor = require('./cursor'),
     PgEscape = require('pg-escape');

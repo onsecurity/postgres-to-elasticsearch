@@ -1,8 +1,8 @@
-const { Client } = require('@elastic/elasticsearch')
+const { Client: OsClient } = require('@opensearch-project/opensearch');
 const _ = require('lodash');
 const moment = require('moment')
 
-const config = require('./config');
+const config = require('../config');
 const log = require('./log');
 
 let existingEsIndices = [];
@@ -11,12 +11,12 @@ let indexQueue = [];
 let dataQueue = [];
 let onFlushCallbacks = [];
 
-const client = new Client( {
+const client = new OsClient({
     node: config.ES_PROTO + '://' + config.ES_HOST + ':' + config.ES_PORT,
     auth: {
         username: config.ES_USERNAME,
-        password: config.ES_PASSWORD,
-    },
+        password: config.ES_PASSWORD
+    }
 });
 
 const bulk = async function(data) {
@@ -47,20 +47,23 @@ const createIndexIfNotExists = async function(index) {
                     }
                     return accept(index);
                 } else {
-                    let mappings = {};
-                        mappings = config.ES_MAPPING;
-                        client.indices.create({
-                            index,
-                            "body": {mappings}
-                        }).then(() => {
-                            if (existingEsIndices.indexOf(index) === -1) {
-                                existingEsIndices.push(index);
-                            }
-                            return accept(index);
-                        }).catch((err) => {
-                            log.fatal('indices.create(' + index + ') failed.', err);
-                            return reject();
-                        });
+                    let mappings = {"properties": {}};
+                    mappings.properties[config.PG_TIMESTAMP_COLUMN] = {"type": "date"};
+                    mappings.properties[config.PG_UID_COLUMN] = {"type": "long"};
+                    mappings.properties[config.ES_LABEL_NAME] = {"type": "keyword"};
+
+                    client.indices.create({
+                        index,
+                        "body": {mappings}
+                    }).then(() => {
+                        if (existingEsIndices.indexOf(index) === -1) {
+                            existingEsIndices.push(index);
+                        }
+                        return accept(index);
+                    }).catch((err) => {
+                        log.fatal('indices.create(' + index + ') failed.', err);
+                        return reject();
+                    });
                 }
             } catch (err) {
                 log.fatal('indices.exists(' + index + ') failed.', err);
