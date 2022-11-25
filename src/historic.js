@@ -64,8 +64,6 @@ let getLastProcessedEventId = async function() {
 let insertHistoricAudit = async function(cursor) {
     let processedRows = 0;
     let highestEventId = null;
-    // const originalPgDeleteOnIndex = config.PG_DELETE_ON_INDEX;
-    // config.PG_DELETE_ON_INDEX = 0; // disable as this is deleted after in 1 bulk request
     let rows = await cursor.readAsync(config.QUEUE_LIMIT)
     if (rows.length) {
         while (rows.length) {
@@ -84,35 +82,8 @@ let insertHistoricAudit = async function(cursor) {
     } else {
         log.info('No historic rows to process');
     }
-    // config.PG_DELETE_ON_INDEX = originalPgDeleteOnIndex;
     return highestEventId;
 };
-
-let deleteAfterHistoricAuditProcessed = async function(lastIndexedEventId, lastProcessedEventId) {
-    return new Promise(async (accept, reject) => {
-        if (config.PG_DELETE_ON_INDEX) {
-            log.debug('Deleting rows where ' + config.PG_UID_COLUMN + ' > ' + lastIndexedEventId + ' and <= ' + lastProcessedEventId);
-            let pg = await pgClient.client();
-            pg.query(
-                'DELETE FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) +
-                ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' > $1' +
-                ' AND ' + PgEscape.ident(config.PG_UID_COLUMN) + ' <= $2',
-                [lastIndexedEventId, lastProcessedEventId],
-                (err, res) => {
-                    if (err) {
-                        log.error('Error when deleting rows from database', err);
-                        return reject();
-                    }
-                    log.info('Deleted a total of ' + res.rowCount + ' rows');
-                    return accept();
-                }
-            );
-        } else {
-            return accept();
-        }
-    });
-};
-
 
 let processHistoricAudit = async function() {
     return new Promise(async (accept, reject) => {
@@ -123,15 +94,13 @@ let processHistoricAudit = async function() {
             lastEventIdIndexed = await getLastProcessedEventId();
             const cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' > $1 ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC', [lastEventIdIndexed]));
             log.info('Historic audit query completed, processing...');
-            const lastProcessedEventId = await insertHistoricAudit(cursor);
-            // await deleteAfterHistoricAuditProcessed(lastEventIdIndexed, lastProcessedEventId);
+            await insertHistoricAudit(cursor);
             return accept()
         } catch (err) {
             log.info('Loading all available audit data for backlog processing');
             const cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC'));
             log.info('Historic audit query completed, processing...');
-            const lastProcessedEventId = await insertHistoricAudit(cursor);
-            // await deleteAfterHistoricAuditProcessed(lastEventIdIndexed, lastProcessedEventId);
+            await insertHistoricAudit(cursor);
             return accept();
         }
     })
