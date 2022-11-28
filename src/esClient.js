@@ -28,8 +28,8 @@ const getBulkQueue = async function () {
         bulkQueue = new PQueueConstructor({
             concurrency: 1,
             throwOnTimeout: true,
-            intervalCap: 5, // 5 per 10 seconds
-            interval: 10000
+            intervalCap: 10, // 10 per 5 seconds
+            interval: 5000
         });
     }
     return bulkQueue;

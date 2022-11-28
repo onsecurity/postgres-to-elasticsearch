@@ -32,6 +32,7 @@ let config = {
     ES_TYPE: process.env.ES_TYPE || '_doc', // The type of the data to be stored in Elasticsearch
     ES_MAPPING: process.env.ES_MAPPING ? JSON.parse(process.env.ES_MAPPING) : null,
     ES_MAX_POST_SIZE: process.env.hasOwnProperty('ES_MAX_POST_SIZE') ? parseInt(process.env.ES_MAX_POST_SIZE) : 10400000, // about 10mb due to aws limits
+    IGNORE_LAST_PROCESSED_ID: process.env.hasOwnProperty('IGNORE_LAST_PROCESSED_ID') ? parseInt(process.env.IGNORE_LAST_PROCESSED_ID) : 0, // If we use the last processed event id to prevent duplicate rows when crashes happen
     QUEUE_LIMIT: process.env.QUEUE_LIMIT || 200, // The maximum number of items that should be queued before pushing to Elasticsearch
     QUEUE_TIMEOUT: process.env.QUEUE_TIMEOUT || 120, // The maximum seconds for an item to be in the queue before it is pushed to Elasticsearch
     LOG_TIMESTAMP: parseInt(process.env.LOG_TIMESTAMP) || 0

@@ -97,7 +97,11 @@ let processHistoricAudit = async function() {
         let cursor;
         try {
             lastEventIdIndexed = await getLastProcessedEventId();
-            cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' > $1 ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC', [lastEventIdIndexed]));
+            if (!config.IGNORE_LAST_PROCESSED_ID) {
+                cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' > $1 ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC', [lastEventIdIndexed]));
+            } else {
+                cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC'));
+            }
         } catch (err) {
             log.info('Loading all available audit data for backlog processing');
             cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' ORDER BY ' + PgEscape.ident(config.PG_UID_COLUMN) + ' ASC'));
