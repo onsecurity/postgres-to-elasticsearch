@@ -11,6 +11,7 @@ const pgClient = new Pg.Client({
     database: config.PG_DATABASE,
     password: config.PG_PASSWORD,
     port: config.PG_PORT,
+    connectionTimeoutMillis: 3e3
 });
 
 let connectPromise = null;

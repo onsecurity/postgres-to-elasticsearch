@@ -1,4 +1,4 @@
-const { Client: OsClient } = require('@opensearch-project/opensearch');
+const { Client: EsClient } = require('@elastic/elasticsearch');
 const _ = require('lodash');
 const moment = require('moment')
 
@@ -11,11 +11,16 @@ let indexQueue = [];
 let dataQueue = [];
 let onFlushCallbacks = [];
 
-const client = new OsClient({
-    node: config.ES_PROTO + '://' + config.ES_HOST + ':' + config.ES_PORT,
+const node = config.ES_PROTO + '://' + config.ES_HOST + ':' + config.ES_PORT
+log.debug("Configured ES client ", node)
+const client = new EsClient({
+    node,
     auth: {
         username: config.ES_USERNAME,
         password: config.ES_PASSWORD
+    },
+    tls: {
+        rejectUnauthorized: !config.ES_ALLOW_INSECURE_SSL
     }
 });
 
@@ -23,7 +28,7 @@ const bulk = async function(data) {
     return new Promise(async (accept, reject) => {
         try {
             const response = await client.bulk({body: data})
-            if (response.body.errors) {
+            if (response.errors) {
                 reject()
             } else {
                 accept();
@@ -37,6 +42,9 @@ const bulk = async function(data) {
 
 
 const createIndexIfNotExists = async function(index) {
+    if (!config.ES_PRE_CREATE_INDICIES) {
+        return
+    }
     if (!creatingEsIndices[index]) {
         creatingEsIndices[index] = new Promise(async (accept, reject) => {
             try {
@@ -47,14 +55,8 @@ const createIndexIfNotExists = async function(index) {
                     }
                     return accept(index);
                 } else {
-                    let mappings = {"properties": {}};
-                    mappings.properties[config.PG_TIMESTAMP_COLUMN] = {"type": "date"};
-                    mappings.properties[config.PG_UID_COLUMN] = {"type": "long"};
-                    mappings.properties[config.ES_LABEL_NAME] = {"type": "keyword"};
-
                     client.indices.create({
                         index,
-                        "body": {mappings}
                     }).then(() => {
                         if (existingEsIndices.indexOf(index) === -1) {
                             existingEsIndices.push(index);
@@ -87,7 +89,7 @@ const flushQueue = async function() {
         let indexQueueToPush = indexQueue.splice(0, indexQueue.length > config.QUEUE_LIMIT ? config.QUEUE_LIMIT : indexQueue.length);
         let dataQueueToPush = dataQueue.splice(0, dataQueue.length > config.QUEUE_LIMIT ? config.QUEUE_LIMIT : dataQueue.length);
 
-        let uniqueIndexes = _.uniq(_.map(indexQueueToPush, item => item.index._index));
+        let uniqueIndexes = _.uniq(_.map(indexQueueToPush, item => item[config.ES_BULK_ACTION]._index));
         for (const uniqueIndex of uniqueIndexes) {
             await createIndexIfNotExists(uniqueIndex);
         }
@@ -139,7 +141,7 @@ let readyPromise;
 const queue = async function(data) {
     let index = getEsIndex(data.table_name);
 
-    let indexRow = {"index": {"_index": index}};
+    let indexRow = {[config.ES_BULK_ACTION]: {"_index": index}};
     indexQueue.push(indexRow);
     if (config.ES_LABEL_NAME !== null && config.ES_LABEL !== null) {
         data[config.ES_LABEL_NAME] = config.ES_LABEL;
@@ -152,10 +154,7 @@ const queue = async function(data) {
 
 module.exports = {
     ready: async function() {
-        if (readyPromise === undefined) {
-            readyPromise = client.ping({}, {requestTimeout: 30000});
-        }
-        return readyPromise;
+        return await client.ping({}, {requestTimeout: 30000});
     },
     client: function() {
         return client;

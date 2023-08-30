@@ -71,4 +71,5 @@ historic.run()
     })
     .catch(err => {
         log.fatal("Error processing historic")
+        process.exit(1)
     });
