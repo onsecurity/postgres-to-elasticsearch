@@ -154,7 +154,10 @@ const queue = async function(data) {
 
 module.exports = {
     ready: async function() {
-        return await client.ping({}, {requestTimeout: 30000});
+        if (readyPromise === undefined) {
+            readyPromise = client.ping({}, {requestTimeout: 30000});
+        }
+        return readyPromise;
     },
     client: function() {
         return client;
