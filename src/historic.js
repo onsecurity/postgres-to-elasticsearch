@@ -45,12 +45,12 @@ let getLastProcessedEventId = async function() {
                 index: getIndexSearchTerm(),
                 body: searchBody,
             })
-            if (searchResult.body.hits.total.value) {
-                const hit = searchResult.body.hits.hits[0]
+            if (searchResult.hits.total.value) {
+                const hit = searchResult.hits.hits[0]
                 log.info('Found last processed ' + config.PG_UID_COLUMN + ': ' + hit._source[config.PG_UID_COLUMN]);
                 accept(hit._source[config.PG_UID_COLUMN]);
             } else {
-                log.debug(searchResult.body);
+                log.debug(searchResult.hits)
                 log.info('No historic audit found, cannot get last processed ' + config.PG_UID_COLUMN);
                 reject('No historic audit');
             }
@@ -110,8 +110,8 @@ let deleteAfterHistoricAuditProcessed = async function(lastProcessedEventId) {
 };
 
 
-let processHistoricAudit = async function() {
-    return new Promise(async (accept, reject) => {
+const processHistoricAudit = async function() {
+    return await new Promise(async (accept, reject) => {
         log.info('Processing historic audit');
         let pg = await pgClient.client();
         try {
@@ -137,6 +137,7 @@ module.exports = {
             await processHistoricAudit();
         } catch (err) {
             log.error("Error processing historic data");
+            throw err
         }
     }
 };
