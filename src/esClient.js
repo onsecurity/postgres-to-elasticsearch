@@ -123,7 +123,6 @@ const getEsIndex = function(tableName) {
     if (config.ES_INDEX_APPEND_TABLE_NAME) {
         index += '-' + tableName
     }
-    index += tableName
     if (config.ES_INDEX_DATE_SUFFIX_FORMAT) {
         const dateString = moment().format(config.ES_INDEX_DATE_SUFFIX_FORMAT)
         index += '-' + dateString

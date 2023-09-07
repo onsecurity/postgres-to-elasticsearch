@@ -10,7 +10,9 @@ const getIndexSearchTerm = () => {
     if (config.ES_INDEX_PREFIX) {
         index += config.ES_INDEX_PREFIX
     }
-    index += '*'
+    if (config.ES_INDEX_APPEND_TABLE_NAME || config.ES_INDEX_DATE_SUFFIX_FORMAT) {
+        index += '*'
+    }
     log.debug(index)
     return index
 }
