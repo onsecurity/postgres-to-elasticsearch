@@ -118,7 +118,10 @@ const flushQueue = async function() {
 const getEsIndex = function(tableName) {
     let index = '';
     if (config.ES_INDEX_PREFIX) {
-        index += config.ES_INDEX_PREFIX + '-'
+        index += config.ES_INDEX_PREFIX
+    }
+    if (config.ES_INDEX_APPEND_TABLE_NAME) {
+        index += '-' + tableName
     }
     index += tableName
     if (config.ES_INDEX_DATE_SUFFIX_FORMAT) {
