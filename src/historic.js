@@ -8,7 +8,7 @@ const esClient = require('./esClient'),
 const getIndexSearchTerm = () => {
     let index = '';
     if (config.ES_INDEX_PREFIX) {
-        index += config.ES_INDEX_PREFIX + '-'
+        index += config.ES_INDEX_PREFIX
     }
     index += '*'
     log.debug(index)
