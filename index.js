@@ -22,6 +22,7 @@ esClient.onFlush(async function(indexQueue, dataQueue) {
                     params.push('$' + paramId);
                 }
                 try {
+                    log.debug('Attempting to delete chunk ' + (index + 1) + ' of ' + chunks.length + ' chunks')
                     const { rowCount } = await pg.query(
                         'DELETE FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) +
                         ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' IN (' + params.join(',') + ')',
