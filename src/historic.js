@@ -89,25 +89,25 @@ let insertHistoricAudit = async function(cursor) {
 
 let deleteAfterHistoricAuditProcessed = async function(lastProcessedEventId) {
     return new Promise(async (accept, reject) => {
-        if (config.PG_DELETE_ON_INDEX) {
-            log.debug('Deleting rows where ' + config.PG_UID_COLUMN + ' <= ' + lastProcessedEventId);
-            let pg = await pgClient.client();
-            pg.query(
-                'DELETE FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) +
-                ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' <= $1',
-                [lastProcessedEventId],
-                (err, res) => {
-                    if (err) {
-                        log.error('Error when deleting rows from database', err);
-                        return reject();
-                    }
-                    log.info('Deleted a total of ' + res.rowCount + ' rows');
-                    return accept();
-                }
-            );
-        } else {
+        if (!config.PG_DELETE_BEFORE_HISTORIC_PROCESSED || !config.PG_DELETE_ON_INDEX) {
             return accept();
         }
+
+        log.debug('Deleting rows where ' + config.PG_UID_COLUMN + ' <= ' + lastProcessedEventId);
+        let pg = await pgClient.client();
+        pg.query(
+            'DELETE FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) +
+            ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' <= $1',
+            [lastProcessedEventId],
+            (err, res) => {
+                if (err) {
+                    log.error('Error when deleting rows from database', err);
+                    return reject();
+                }
+                log.info('Deleted a total of ' + res.rowCount + ' rows');
+                return accept();
+            }
+        );
     });
 };
 
