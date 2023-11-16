@@ -118,7 +118,10 @@ const processHistoricAudit = async function() {
         let pg = await pgClient.client();
         try {
             const event_id = await getLastProcessedEventId();
-            const cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' > $1', [event_id]));
+            const TABLE = `${PgEscape.ident(config.PG_SCHEMA)}.${PgEscape.ident(config.PG_TABLE)}`
+            const COLUMN = PgEscape.ident(config.PG_UID_COLUMN)
+            const ORDER_BY = PgEscape.ident(config.PG_ORDER_BY_COLUMN)
+            const cursor = pg.query(new Cursor(`SELECT * FROM ${TABLE} WHERE ${COLUMN} > $1 ORDER BY ${ORDER_BY} asc`, [event_id]));
             log.info('Historic audit query completed, processing...');
             await insertHistoricAudit(cursor);
             deleteAfterHistoricAuditProcessed(event_id);
