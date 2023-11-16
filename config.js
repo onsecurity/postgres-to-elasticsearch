@@ -36,7 +36,7 @@ let config = {
     ES_ALLOW_INSECURE_SSL: process.env.ES_ALLOW_INSECURE_SSL ? JSON.parse(process.env.ES_ALLOW_INSECURE_SSL) : false,
     ES_PRE_CREATE_INDICIES: process.env.ES_PRE_CREATE_INDICIES ? JSON.parse(process.env.ES_PRE_CREATE_INDICIES) : false,
     ES_BULK_ACTION: process.env.ES_BULK_ACTION || 'create',
-    QUEUE_LIMIT: process.env.QUEUE_LIMIT || 200, // The maximum number of items that should be queued before pushing to Elasticsearch
+    QUEUE_LIMIT: process.env.QUEUE_LIMIT || 500, // The maximum number of items that should be queued before pushing to Elasticsearch
     QUEUE_TIMEOUT: process.env.QUEUE_TIMEOUT || 120, // The maximum seconds for an item to be in the queue before it is pushed to Elasticsearch
     LOG_TIMESTAMP: parseInt(process.env.LOG_TIMESTAMP) || 0
 };
