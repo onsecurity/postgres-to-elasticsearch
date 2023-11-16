@@ -29,9 +29,15 @@ const bulk = async function(data) {
         try {
             const response = await client.bulk({body: data})
             if (response.errors) {
-                reject()
+                const items = response.items.map(item => item[config.ES_BULK_ACTION])
+                const succeeded = items.filter(item => !item.error)
+                const failed = items.filter(item => !!item.error)
+                log.debug(`Successfully indexed ${succeeded.length} of ${items.length} items`);
+                log.debug(`Failed to index ${failed.length} of ${items.length} items`);
+                reject(response)
             } else {
-                accept();
+                log.debug(`Successfully indexed ${response.items.length} items`);
+                accept(response);
             }
         } catch (err) {
             log.info("Error running bulk operation")
@@ -101,15 +107,11 @@ const flushQueue = async function() {
 
         try {
             await bulk(bulkData)
-            log.debug('Successfully indexed ', dataQueueToPush.length, ' items');
             for (const callback of onFlushCallbacks) {
                 await callback(indexQueueToPush, dataQueueToPush).catch(err => log.error(err))
             }
             return accept();
         } catch (err) {
-            log.error('Failed to log ', dataQueueToPush.length, ' items', err);
-            dataQueue = dataQueueToPush.concat(dataQueue);
-            indexQueue = indexQueueToPush.concat(indexQueue);
             return reject();
         }
     });
@@ -143,7 +145,7 @@ let readyPromise;
 const queue = async function(data) {
     let index = getEsIndex(data.table_name);
 
-    let indexRow = {[config.ES_BULK_ACTION]: {"_index": index}};
+    let indexRow = {[config.ES_BULK_ACTION]: {"_index": index, "_id": data[config.PG_UID_COLUMN] }};
     indexQueue.push(indexRow);
     if (config.ES_LABEL_NAME !== null && config.ES_LABEL !== null) {
         data[config.ES_LABEL_NAME] = config.ES_LABEL;
