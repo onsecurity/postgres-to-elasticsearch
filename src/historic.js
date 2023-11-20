@@ -2,8 +2,10 @@ const esClient = require('./esClient'),
     pgClient = require('./pgClient'),
     config = require('../config'),
     log = require('./log'),
-    Cursor = require('./cursor'),
+    Cursor = require('pg-cursor'),
     PgEscape = require('pg-escape');
+
+let SHUTTING_DOWN = false
 
 const getIndexSearchTerm = () => {
     let index = '';
@@ -67,10 +69,13 @@ let insertHistoricAudit = async function(cursor) {
     let processedRows = 0;
     let highestEventId = null;
 
-    let rows = await cursor.readAsync(config.QUEUE_LIMIT)
+    let rows = await cursor.read(config.QUEUE_LIMIT)
     if (rows.length) {
         while (rows.length) {
             for (const row of rows) {
+                if (SHUTTING_DOWN) {
+                    return
+                }
                 if (row[config.PG_UID_COLUMN] > highestEventId || highestEventId === null) {
                     highestEventId = parseInt(row[config.PG_UID_COLUMN]);
                 }
@@ -79,7 +84,7 @@ let insertHistoricAudit = async function(cursor) {
     
             processedRows += rows.length;
     
-            rows = await cursor.readAsync(config.QUEUE_LIMIT)
+            rows = await cursor.read(config.QUEUE_LIMIT)
         }
         log.info('No more historic rows to process, processed a total of ' + processedRows + ' rows');
     } else {
@@ -88,50 +93,46 @@ let insertHistoricAudit = async function(cursor) {
 };
 
 let deleteAfterHistoricAuditProcessed = async function(lastProcessedEventId) {
-    return new Promise(async (accept, reject) => {
-        if (!config.PG_DELETE_BEFORE_HISTORIC_PROCESSED || !config.PG_DELETE_ON_INDEX) {
-            return accept();
-        }
+    if (!config.PG_DELETE_BEFORE_HISTORIC_PROCESSED || !config.PG_DELETE_ON_INDEX) {
+        return;
+    }
 
-        log.debug('Deleting rows where ' + config.PG_UID_COLUMN + ' <= ' + lastProcessedEventId);
-        let pg = await pgClient.client();
-        pg.query(
+    log.debug('Deleting rows where ' + config.PG_UID_COLUMN + ' <= ' + lastProcessedEventId);
+    try {
+        const { rowCount } = await pgClient.query(
             'DELETE FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) +
             ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' <= $1',
-            [lastProcessedEventId],
-            (err, res) => {
-                if (err) {
-                    log.error('Error when deleting rows from database', err);
-                    return reject();
-                }
-                log.info('Deleted a total of ' + res.rowCount + ' rows');
-                return accept();
-            }
-        );
-    });
+            [lastProcessedEventId]);
+        log.debug(`DELETED ${rowCount} rows`)
+    } catch (err) {
+        log.error('Error when deleting rows from database', err);
+        throw err
+    }
 };
 
 
 const processHistoricAudit = async function() {
     return await new Promise(async (accept, reject) => {
         log.info('Processing historic audit');
-        let pg = await pgClient.client();
+        const pg = await pgClient.getPool().connect()
         try {
             const event_id = await getLastProcessedEventId();
             const TABLE = `${PgEscape.ident(config.PG_SCHEMA)}.${PgEscape.ident(config.PG_TABLE)}`
             const COLUMN = PgEscape.ident(config.PG_UID_COLUMN)
             const ORDER_BY = PgEscape.ident(config.PG_ORDER_BY_COLUMN)
-            const cursor = pg.query(new Cursor(`SELECT * FROM ${TABLE} WHERE ${COLUMN} > $1 ORDER BY ${ORDER_BY} asc`, [event_id]));
+            const cursor = await pg.query(new Cursor(`SELECT * FROM ${TABLE} WHERE ${COLUMN} > $1 ORDER BY ${ORDER_BY} asc`, [event_id]));
             log.info('Historic audit query completed, processing...');
             await insertHistoricAudit(cursor);
-            deleteAfterHistoricAuditProcessed(event_id);
+            await deleteAfterHistoricAuditProcessed(event_id);
+            await pg.release()
             return accept()
         } catch (err) {
             log.info('Loading all available audit data for backlog processing');
-            const cursor = pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE)));
+            const cursor = await pg.query(new Cursor('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE)));
             log.info('Historic audit query completed, processing...');
             await insertHistoricAudit(cursor);
-            return accept();
+            await pg.release()
+            return accept()
         }
     })
 };
@@ -144,6 +145,9 @@ module.exports = {
             log.error("Error processing historic data");
             throw err
         }
+    },
+    stop: function() {
+        SHUTTING_DOWN = true
     }
 };
 

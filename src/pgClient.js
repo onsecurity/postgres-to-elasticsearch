@@ -5,7 +5,7 @@ const config = require('../config');
 const log = require('./log');
 const esClient = require('./esClient');
 
-const pgClient = new Pg.Client({
+const pool = new Pg.Pool({
     user: config.PG_USERNAME,
     host: config.PG_HOST,
     database: config.PG_DATABASE,
@@ -14,60 +14,52 @@ const pgClient = new Pg.Client({
     connectionTimeoutMillis: 3e3
 });
 
-let connectPromise = null;
-let connectToPg = function() {
-    if (connectPromise === null) {
-        connectPromise = new Promise((accept, reject) => {
-            pgClient.connect((err) => {
-                if (err) {
-                    log.fatal('Could not connect');
-                } else {
-                    log.debug('PG connected');
-                    setPgTypeParsers();
-                    accept(pgClient);
-                }
-            });
-        });
-    }
-    return connectPromise;
-};
+let hstoreParserSet = false
+let listenerClient;
 
-let setPgTypeParsers = function() {
+const init = async function() {
+    if (!hstoreParserSet) {
+        await setPgTypeParsers();
+        hstoreParserSet = true
+    }
+}
+
+const query = async (text, params) => {
+    return pool.query(text, params)
+}
+
+const setPgTypeParsers = async function() {
     let types = Pg.types;
     let hstore = require('pg-hstore')();
 
-    getHstoreTypeId().then((typeId) => {
+    try {
+        const typeId = await getHstoreTypeId()
         log.info('Found Hstore type id, Hstore processing enabled.');
         types.setTypeParser(typeId, (val) => {
             return hstore.parse(val);
         });
-    }).catch(() => {
+    } catch (err) {
         log.info('Cannot find hstore type id, will not process hstore data.');
-    });
+    }
 };
 
-let getHstoreTypeId = function() {
-    return new Promise((accept, reject) => {
-        pgClient.query(
-            'SELECT oid FROM pg_type where typname = $1',
-            ['hstore'],
-            (err, res) => {
-                if (err || !res.rows.length) {
-                    log.debug('Hstore search error', err);
-                    return reject();
-                }
-
-                if (res.rows.length) {
-                    log.debug('Found hstore type oid', res.rows[0].oid);
-                    return accept(res.rows[0].oid);
-                }
-            }
-        );
-    });
+const getHstoreTypeId = async function() {
+    try {
+        const result = await pool.query('SELECT oid FROM pg_type where typname = $1', ['hstore']);
+        if (result.rows.length) {
+            log.debug('Found hstore type oid', result.rows[0].oid);
+            return result.rows[0].oid;
+        }
+    } catch (err) {
+        log.debug('Hstore search error', err);
+        throw err
+    }
 };
 
-let startListener = function() {
-    pgClient.on('notification', function (msg) {
+let startListener = async function() {
+    const client = await pool.connect()
+    listenerClient = client
+    client.on('notification', function (msg) {
         log.debug('Received notification on ' + msg.channel, msg.payload);
         if (msg.channel === config.PG_LISTEN_TO) {
             log.debug('Queuing item from ' + config.PG_LISTEN_TO);
@@ -84,12 +76,12 @@ let startListener = function() {
     });
     log.debug('PG notification listener created');
 
-    pgClient.query("LISTEN " + config.PG_LISTEN_TO).then(() => {
+    client.query("LISTEN " + config.PG_LISTEN_TO).then(() => {
         log.info('LISTEN ' + config.PG_LISTEN_TO + ' statement completed');
     }).catch((err) => {
         log.fatal('LISTEN ' + config.PG_LISTEN_TO + ' statement failed');
     });
-    pgClient.query("LISTEN " + config.PG_LISTEN_TO_ID).then(() => {
+    client.query("LISTEN " + config.PG_LISTEN_TO_ID).then(() => {
         log.info('LISTEN ' + config.PG_LISTEN_TO_ID + ' statement completed');
     }).catch((err) => {
         log.fatal('LISTEN ' + config.PG_LISTEN_TO_ID + ' statement failed', err);
@@ -98,7 +90,7 @@ let startListener = function() {
 
 let loadPgRow = function(event_id) {
     return new Promise((accept, reject) => {
-        pgClient.query('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' = $1', [event_id]).then((res) => {
+        query('SELECT * FROM ' + PgEscape.ident(config.PG_SCHEMA) + '.' + PgEscape.ident(config.PG_TABLE) + ' WHERE ' + PgEscape.ident(config.PG_UID_COLUMN) + ' = $1', [event_id]).then((res) => {
             if (res.rowCount) {
                 return accept(res.rows[0]);
             } else {
@@ -116,7 +108,7 @@ let queueRecord = async function(row) {
 
 let getAuditedTables = async function() {
     return new Promise((accept, reject) => {
-        pgClient.query(`SELECT table_name FROM ${PgEscape.ident(config.PG_SCHEMA)}.${PgEscape.ident(config.PG_TABLE)} GROUP BY table_name`)
+        query(`SELECT table_name FROM ${PgEscape.ident(config.PG_SCHEMA)}.${PgEscape.ident(config.PG_TABLE)} GROUP BY table_name`)
             .then(res => {
                 if (res.rowCount) {
                     const tables = res.rows.map((row) => row.table_name)
@@ -131,17 +123,16 @@ let getAuditedTables = async function() {
 }
 
 module.exports = {
-    start: function() {
-        connectToPg().then(() => {
-            startListener();
-        })
-    },
-    client: async function() {
-        return await connectToPg();
+    init,
+    start: startListener,
+    query,
+    getPool: function() {
+        return pool
     },
     end: async function() {
         try {
-            return await pgClient.end();
+            listenerClient && await listenerClient.end()
+            return await pool.end();
         } catch(err) {
             log.error("Error while closing pgClient");
         }

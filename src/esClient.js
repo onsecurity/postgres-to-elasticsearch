@@ -134,9 +134,9 @@ const getEsIndex = function(tableName) {
 
 let flushInterval
 const beginInterval = () => {
-    flushInterval = setInterval(() => {
+    flushInterval = setInterval(async () => {
         log.debug("Flushing at interval");
-        flushQueue().catch(() => {});
+        await flushQueue();
     }, config.QUEUE_TIMEOUT * 1000);
 }
 
@@ -152,14 +152,14 @@ const queue = async function(data) {
     }
     dataQueue.push(data);
     if (indexQueue.length >= config.QUEUE_LIMIT) {
-        await flushQueue().catch(() => {});
+        await flushQueue();
     }
 }
 
 module.exports = {
     ready: async function() {
         if (readyPromise === undefined) {
-            readyPromise = client.ping({}, {requestTimeout: 30000});
+            readyPromise = client.ping({}, {requestTimeout: 3e4});
         }
         return readyPromise;
     },
