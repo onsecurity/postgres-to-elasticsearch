@@ -22,6 +22,8 @@ let config = {
     PG_DELETE_BEFORE_HISTORIC_PROCESSED: process.env.hasOwnProperty('PG_DELETE_BEFORE_HISTORIC_PROCESSED') ? parseInt(process.env.PG_DELETE_BEFORE_HISTORIC_PROCESSED) : 0, // Delete the rows in PostgreSQL after they have been indexed to Elasticsearch
     PG_SCHEMA: process.env.PG_SCHEMA || 'audit', // The schema of the table which rows which will be deleted from PG_DELETE_ON_INDEX
     PG_TABLE: process.env.PG_TABLE || 'logged_actions', // The table name which rows will be deleted from by PG_DELETE_ON_INDEX
+    PG_SSL: process.env.PG_SSL ? Boolean(process.env.PG_SSL) : false, // Use SSL to connect to the PostgreSQL database
+    PG_SSL_CA: process.env.PG_SSL_CA_FILE ? fs.readFileSync(process.env.PG_SSL_CA_FILE) : undefined, // The path to the CA file for the PostgreSQL database
     ES_LABEL_NAME: process.env.ES_LABEL_NAME || null,
     ES_LABEL: process.env.ES_LABEL || null,
     ES_HOST: process.env.ES_HOST || 'localhost', // The hostname for the Elasticsearch server (pooling not supported currently)

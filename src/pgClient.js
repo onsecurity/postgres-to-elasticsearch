@@ -11,7 +11,12 @@ const pool = new Pg.Pool({
     database: config.PG_DATABASE,
     password: config.PG_PASSWORD,
     port: config.PG_PORT,
-    connectionTimeoutMillis: 3e3
+    connectionTimeoutMillis: 3e3,
+    ...(config.PG_SSL ? {
+        ssl: {
+            ca: config.PG_SSL_CA,
+        }
+    } : {})
 });
 
 let hstoreParserSet = false
