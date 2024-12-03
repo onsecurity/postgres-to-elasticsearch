@@ -121,8 +121,8 @@ let getAuditedTables = async function() {
                 } else {
                     accept([]);
                 }
-            }).catch(() => {
-                return reject();
+            }).catch((err) => {
+                return reject(err);
             })
     })
 }

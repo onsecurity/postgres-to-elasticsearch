@@ -9,7 +9,6 @@ const _ = require('lodash'),
 
 esClient.onFlush(async function(indexQueue, dataQueue) {
     if (config.PG_DELETE_ON_INDEX) {
-        // let pg = await pgClient.getPool().connect();
         let eventIds = dataQueue.map(index => index[config.PG_UID_COLUMN]);
         log.debug('UIDs to be deleted: ', eventIds);
         log.debug('Deleting ' + eventIds.length + ' rows after index');
