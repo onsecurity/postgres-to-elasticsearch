@@ -42,11 +42,11 @@ const exit = async () => {
 
         historic.stop()
         log.debug('Stopped Historic')
-    
+
         log.debug('Closing PG connection');
         await pgClient.end()
         log.debug('Closed PG connection');
-        
+
         log.log('Exiting gracefully');
         process.exit(0);
     } catch (err) {

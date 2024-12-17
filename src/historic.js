@@ -21,20 +21,22 @@ const getIndexSearchTerm = () => {
 
 let getLastProcessedEventId = async function() {
     return new Promise(async (accept, reject) => {
-        try {
-            await esClient.ready();
-            const tables = await pgClient.getAuditedTables()
-            createPromises = tables.map(table => esClient.createIndexIfNotExists(esClient.getEsIndex(table)))
-            await Promise.all(createPromises);
-        } catch (err) {
-            log.error(err.message)
-            log.debug(err.stack)
-            log.fatal("Failed initialising esClient")
+        if (config.ES_PRE_CREATE_INDICIES) {
+            try {
+                await esClient.ready();
+                const tables = await pgClient.getAuditedTables()
+                createPromises = tables.map(table => esClient.createIndexIfNotExists(esClient.getEsIndex(table)))
+                await Promise.all(createPromises);
+            } catch (err) {
+                log.error(err.message)
+                log.debug(err.stack)
+                log.fatal("Failed initialising esClient")
+            }
         }
         let es = esClient.client();
         log.debug('Searching for last processed ' + config.PG_UID_COLUMN);
         let sort = {};
-        sort[config.PG_TIMESTAMP_COLUMN] = {"order": "desc"};
+        sort[config.ES_TIMESTAMP_COLUMN] = {"order": "desc"};
 
         let searchBody = {
             from: 0,
@@ -150,5 +152,4 @@ module.exports = {
         SHUTTING_DOWN = true
     }
 };
-
 

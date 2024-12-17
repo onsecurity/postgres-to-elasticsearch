@@ -112,7 +112,8 @@ const flushQueue = async function() {
             }
             return accept();
         } catch (err) {
-            return reject();
+            log.error('Error flushing queue', err);
+            return reject(err);
         }
     });
 };
@@ -149,6 +150,10 @@ const queue = async function(data) {
     indexQueue.push(indexRow);
     if (config.ES_LABEL_NAME !== null && config.ES_LABEL !== null) {
         data[config.ES_LABEL_NAME] = config.ES_LABEL;
+    }
+    if (config.RENAME_TIMESTAMP_COLUMN && config.PG_TIMESTAMP_COLUMN !== config.ES_TIMESTAMP_COLUMN) {
+        data[config.ES_TIMESTAMP_COLUMN] = data[config.PG_TIMESTAMP_COLUMN];
+        delete data[config.PG_TIMESTAMP_COLUMN];
     }
     dataQueue.push(data);
     if (indexQueue.length >= config.QUEUE_LIMIT) {
